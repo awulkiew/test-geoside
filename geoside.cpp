@@ -39,6 +39,11 @@ double step = 0.1;
 double a = 1;
 double b = 0.75;
 
+double disp_x_min = -60;
+double disp_y_min = -60;
+double disp_x_max = 60;
+double disp_y_max = 60;
+
 void fill_points()
 {
     typedef bgm::point<double, 2, bg::cs::geographic<bg::degree> > geo_point;
@@ -86,6 +91,14 @@ void render_scene(void)
 {
     glClear(GL_COLOR_BUFFER_BIT);
 
+    double disp_width = disp_x_max - disp_x_min;
+    double disp_height = disp_y_max - disp_y_min;
+    double lon_width = lon_max - lon_min;
+    double lat_height = lat_max - lat_min;
+
+    double scale_x = disp_width / lon_width;
+    double scale_y = disp_height / lat_height;
+
     size_t i = 0;
     for ( double x = lon_min ; x <= lon_max ; x += step )
     {
@@ -108,11 +121,16 @@ void render_scene(void)
                     glColor3f(0, 1, 1);
             }
             
+            double xt = (x - lon_min) * scale_x + disp_x_min;
+            double yt = (y - lat_min) * scale_y + disp_y_min;
+            double step_h_x = step / 2 * scale_x;
+            double step_h_y = step / 2 * scale_y;
+
             glBegin(GL_QUADS);
-            glVertex3f(x-step/2, y-step/2, 0);
-            glVertex3f(x+step/2, y-step/2, 0);
-            glVertex3f(x+step/2, y+step/2, 0);
-            glVertex3f(x-step/2, y+step/2, 0);
+            glVertex3f(xt-step_h_x, yt-step_h_y, 0);
+            glVertex3f(xt+step_h_x, yt-step_h_y, 0);
+            glVertex3f(xt+step_h_x, yt+step_h_y, 0);
+            glVertex3f(xt-step_h_x, yt+step_h_y, 0);
             glEnd();
         }
     }
@@ -167,7 +185,7 @@ int main(int argc, char **argv)
     glutInitDisplayMode(GLUT_DEPTH | GLUT_SINGLE | GLUT_RGBA);
     glutInitWindowPosition(100,100);
     glutInitWindowSize(800, 800);
-    glutCreateWindow("boost::geometry::index::rtree GLUT test");
+    glutCreateWindow("test-geoside");
 
     glutDisplayFunc(render_scene);
     glutReshapeFunc(resize);
