@@ -20,6 +20,10 @@ Spheroid with flattening = 1/300 (Earth)
 
 ![f=1/300(earth)](fearth.png)
 
+Spheroid with flattening = 1/300 (Earth) magnification of a fragment [11,17]x[12,18]
+
+![f=1/300(earth) magnification](fearth1117x1218.png)
+
 Spheroid with flattening = 0.25
 
 ![f=0.25](f0.25.png)
