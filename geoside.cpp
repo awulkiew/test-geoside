@@ -26,6 +26,15 @@ struct point_info
 };
 
 std::vector<point_info> points;
+
+double lon_s1 = -51;
+double lat_s1 = -51;
+double lon_s2 = 51;
+double lat_s2 = 51;
+double lon_min = -50;
+double lat_min = -50;
+double lon_max = 50;
+double lat_max = 50;
 double step = 0.1;
 double a = 1;
 double b = 0.75;
@@ -37,20 +46,20 @@ void fill_points()
 
     bg::srs::spheroid<double> sph(a, b);
 
-    bgd::vincenty_inverse<double> vi(-51 * bg::math::d2r,
-                                     -51 * bg::math::d2r,
-                                     51 * bg::math::d2r,
-                                     51 * bg::math::d2r,
+    bgd::vincenty_inverse<double> vi(lon_s1 * bg::math::d2r,
+                                     lat_s1 * bg::math::d2r,
+                                     lon_s2 * bg::math::d2r,
+                                     lat_s2 * bg::math::d2r,
                                      sph);
     double fwd = vi.azimuth12();
     normalize(fwd);
 
-    for ( double x = -50 ; x <= 50 ; x += step )
+    for ( double x = lon_min ; x <= lon_max ; x += step )
     {
-        for ( double y = -50 ; y <= 50 ; y += step )
+        for ( double y = lat_min ; y <= lat_max ; y += step )
         {
-            bgd::vincenty_inverse<double> vi2(-51 * bg::math::d2r,
-                                              -51 * bg::math::d2r,
+            bgd::vincenty_inverse<double> vi2(lon_s1 * bg::math::d2r,
+                                              lon_s1 * bg::math::d2r,
                                               x * bg::math::d2r,
                                               y * bg::math::d2r,
                                               sph);
@@ -59,7 +68,7 @@ void fill_points()
             normalize(fwd2);
 
             bg::strategy::side::spherical_side_formula<double> ssf;
-            int ss = ssf.apply(sph_point(-51, -51), sph_point(51, 51), sph_point(x, y));
+            int ss = ssf.apply(sph_point(lon_s1, lat_s1), sph_point(lon_s2, lat_s2), sph_point(x, y));
 
             point_info pi;
             pi.lon = x;
@@ -78,9 +87,9 @@ void render_scene(void)
     glClear(GL_COLOR_BUFFER_BIT);
 
     size_t i = 0;
-    for ( double x = -50 ; x <= 50 ; x += step )
+    for ( double x = lon_min ; x <= lon_max ; x += step )
     {
-        for ( double y = -50 ; y <= 50 ; y += step )
+        for ( double y = lat_min ; y <= lat_max ; y += step )
         {
             point_info pi = points[i++];
 
