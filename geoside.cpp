@@ -3,6 +3,9 @@
 #include <boost/geometry.hpp>
 #include <boost/geometry/extensions/gis/geographic/strategies/vincenty.hpp>
 
+#include <iostream>
+#include <vector>
+
 namespace bg = boost::geometry;
 namespace bgm = bg::model;
 namespace bgd = bg::detail;
@@ -16,14 +19,23 @@ void normalize(T & a)
         a += bg::math::pi<T>() * 2;
 }
 
-void render_scene(void)
+struct point_info
 {
-    glClear(GL_COLOR_BUFFER_BIT);
+    double lon, lat, azi_s, azi_p;
+    int sph_s;
+};
 
+std::vector<point_info> points;
+double step = 0.1;
+double a = 1;
+double b = 0.75;
+
+void fill_points()
+{
     typedef bgm::point<double, 2, bg::cs::geographic<bg::degree> > geo_point;
     typedef bgm::point<double, 2, bg::cs::spherical_equatorial<bg::degree> > sph_point;
-    
-    bg::srs::spheroid<double> sph(1, 0.75);
+
+    bg::srs::spheroid<double> sph(a, b);
 
     bgd::vincenty_inverse<double> vi(-51 * bg::math::d2r,
                                      -51 * bg::math::d2r,
@@ -31,9 +43,8 @@ void render_scene(void)
                                      51 * bg::math::d2r,
                                      sph);
     double fwd = vi.azimuth12();
-    double bck = vi.azimuth21();
+    normalize(fwd);
 
-    double step = 0.1;
     for ( double x = -50 ; x <= 50 ; x += step )
     {
         for ( double y = -50 ; y <= 50 ; y += step )
@@ -44,25 +55,45 @@ void render_scene(void)
                                               y * bg::math::d2r,
                                               sph);
 
+            double fwd2 = vi2.azimuth12();
+            normalize(fwd2);
+
             bg::strategy::side::spherical_side_formula<double> ssf;
             int ss = ssf.apply(sph_point(-51, -51), sph_point(51, 51), sph_point(x, y));
 
-            double fwd2 = vi2.azimuth12();
-            double bck2 = vi2.azimuth21();
+            point_info pi;
+            pi.lon = x;
+            pi.lat = y;
+            pi.azi_s = fwd;
+            pi.azi_p = fwd2;
+            pi.sph_s = ss;
 
-            normalize(fwd);
-            normalize(fwd2);
+            points.push_back(pi);
+        }
+    }
+}
 
-            if ( fwd2 > fwd ) // right
+void render_scene(void)
+{
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    size_t i = 0;
+    for ( double x = -50 ; x <= 50 ; x += step )
+    {
+        for ( double y = -50 ; y <= 50 ; y += step )
+        {
+            point_info pi = points[i++];
+
+            if ( pi.azi_p > pi.azi_s ) // right
             {
-                if ( ss < 0 ) // right
+                if ( pi.sph_s < 0 ) // right
                     glColor3f(0.25, 0, 0);
                 else
                     glColor3f(1, 0, 1);
             }
             else // left
             {
-                if ( ss > 0 ) // left
+                if ( pi.sph_s > 0 ) // left
                     glColor3f(0, 0.25, 0);
                 else
                     glColor3f(0, 1, 1);
@@ -119,6 +150,10 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 
 int main(int argc, char **argv)
 {
+    std::cout << "filling points" << std::endl;
+    fill_points();
+    std::cout << "visualizing" << std::endl;
+
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DEPTH | GLUT_SINGLE | GLUT_RGBA);
     glutInitWindowPosition(100,100);
