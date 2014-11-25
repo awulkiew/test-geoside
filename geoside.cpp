@@ -64,7 +64,7 @@ void fill_points()
         for ( double y = lat_min ; y <= lat_max ; y += step )
         {
             bgd::vincenty_inverse<double> vi2(lon_s1 * bg::math::d2r,
-                                              lon_s1 * bg::math::d2r,
+                                              lat_s1 * bg::math::d2r,
                                               x * bg::math::d2r,
                                               y * bg::math::d2r,
                                               sph);
