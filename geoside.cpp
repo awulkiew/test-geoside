@@ -1,7 +1,6 @@
 #include <GL/glut.h>
 
 #include <boost/geometry.hpp>
-#include <boost/geometry/extensions/gis/geographic/strategies/vincenty.hpp>
 
 #include <iostream>
 #include <vector>
