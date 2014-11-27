@@ -30,11 +30,11 @@ double lon_s1 = -51;
 double lat_s1 = -51;
 double lon_s2 = 51;
 double lat_s2 = 51;
-double lon_min = -50;
-double lat_min = -50;
-double lon_max = 50;
-double lat_max = 50;
-double step = 0.1;
+double step = 0.2;
+double lon_min = lon_s1;
+double lat_min = lat_s1;
+double lon_max = lon_s2;
+double lat_max = lat_s2;
 double a = 1;
 double b = 0.75;
 bg::srs::spheroid<double> sph(a, b);
@@ -57,9 +57,9 @@ void fill_points()
     double fwd = vi.azimuth12();
     normalize(fwd);
 
-    for ( double x = lon_min ; x <= lon_max ; x += step )
+    for ( double y = lat_min ; y <= lat_max ; y += step )
     {
-        for ( double y = lat_min ; y <= lat_max ; y += step )
+        for ( double x = lon_min ; x <= lon_max ; x += step )    
         {
             bgd::vincenty_inverse<double> vi2(lon_s1 * bg::math::d2r,
                                               lat_s1 * bg::math::d2r,
@@ -85,22 +85,24 @@ void fill_points()
     }
 }
 
+std::vector<point_info> path_geo;
+std::vector<point_info> path_sph;
+
 void measure_paths()
 {
-    std::vector<point_info> path_geo;
-    std::vector<point_info> path_sph;
-
     size_t i = 0;
-    for ( double x = lon_min ; x <= lon_max ; x += step )
+    for ( double y = lat_min ; y <= lat_max ; y += step )
     {
         bool last_left_geo = true;
         bool last_left_sph = true;
 
-        for ( double y = lat_min ; y <= lat_max ; y += step )
+        for ( double x = lon_min ; x <= lon_max ; x += step )    
         {
             point_info pi = points[i++];
 
-            if ( pi.azi_p > pi.azi_s ) // right
+            bool is_s1 = lon_s1 == pi.lon && lat_s1 == pi.lat;
+
+            if ( pi.azi_p > pi.azi_s || is_s1 ) // right
             {
                 if ( last_left_geo )
                 {
@@ -109,7 +111,7 @@ void measure_paths()
                 }
             }
 
-            if ( pi.sph_s < 0 ) // right
+            if ( pi.sph_s < 0 || is_s1 ) // right
             {
                 if ( last_left_sph )
                 {
@@ -161,6 +163,15 @@ void measure_paths()
                                       sph_point(pi2.lon, pi2.lat));
     }
 
+    std::cout << "(V) - vincenty, (A) - andoyer, (H) - haversine " << std::endl;
+
+    std::cout << "distance (V) = " << std::setprecision(32)
+              << bg::distance(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), vi) << std::endl;
+    std::cout << "distance (A) = " << std::setprecision(32)
+              << bg::distance(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), an) << std::endl;
+    std::cout << "distance (H) = " << std::setprecision(32)
+              << bg::distance(sph_point(lon_s1, lat_s1), sph_point(lon_s2, lat_s2)) << std::endl;
+
     std::cout << "length geo geodesic (V) = " << std::setprecision(32) << distance_geo1 << std::endl;
     std::cout << "length sph geodesic (V) = " << std::setprecision(32) << distance_sph1 << std::endl;
     std::cout << "length geo geodesic (A) = " << std::setprecision(32) << distance_geo2 << std::endl;
@@ -182,9 +193,9 @@ void render_scene(void)
     double scale_y = disp_height / lat_height;
 
     size_t i = 0;
-    for ( double x = lon_min ; x <= lon_max ; x += step )
+    for ( double y = lat_min ; y <= lat_max ; y += step )
     {
-        for ( double y = lat_min ; y <= lat_max ; y += step )
+        for ( double x = lon_min ; x <= lon_max ; x += step )    
         {
             point_info pi = points[i++];
 
@@ -216,6 +227,32 @@ void render_scene(void)
             glEnd();
         }
     }
+
+    glColor3f(1, 1, 1);
+    glBegin(GL_LINE_STRIP);
+    for ( size_t i = 0 ; i < path_geo.size() ; ++i )
+    {
+        point_info p = path_geo[i];
+
+        double xt = (p.lon - lon_min) * scale_x + disp_x_min;
+        double yt = (p.lat - lat_min) * scale_y + disp_y_min;
+        
+        glVertex3f(xt, yt, 0);
+    }
+    glEnd();
+
+    glColor3f(1, 1, 0);
+    glBegin(GL_LINE_STRIP);
+    for ( size_t i = 0 ; i < path_sph.size() ; ++i )
+    {
+        point_info p = path_sph[i];
+
+        double xt = (p.lon - lon_min) * scale_x + disp_x_min;
+        double yt = (p.lat - lat_min) * scale_y + disp_y_min;
+
+        glVertex3f(xt, yt, 0);
+    }
+    glEnd();
 
     glFlush();
 }
