@@ -36,8 +36,13 @@ double lat_min = lat_s1 - 30;
 double lon_max = lon_s2 + 30;
 double lat_max = lat_s2 + 30;
 double a = 1;
-double b = 0.5;
-bg::srs::spheroid<double> sph(a, b);
+double b = 1;
+bg::srs::spheroid<double> spheroid(a, b);
+
+bg::strategy::distance::vincenty<bg::srs::spheroid<double> > vincenty(spheroid);
+bg::strategy::distance::andoyer<bg::srs::spheroid<double> > andoyer(spheroid);
+bg::strategy::distance::haversine<double> haversine_mean((2*a+b)/3);
+bg::strategy::distance::haversine<double> haversine_max(a);
 
 double disp_x_min = -60;
 double disp_y_min = -60;
@@ -53,7 +58,7 @@ void fill_points()
                                      lat_s1 * bg::math::d2r,
                                      lon_s2 * bg::math::d2r,
                                      lat_s2 * bg::math::d2r,
-                                     sph);
+                                     spheroid);
     double fwd = vi.azimuth12();
     normalize(fwd);
     double bck = vi.azimuth21();
@@ -67,7 +72,7 @@ void fill_points()
                                               lat_s1 * bg::math::d2r,
                                               x * bg::math::d2r,
                                               y * bg::math::d2r,
-                                              sph);
+                                              spheroid);
 
             double fwd2 = vi2.azimuth12();
             normalize(fwd2);
@@ -141,51 +146,60 @@ void measure_paths()
     typedef bgm::point<double, 2, bg::cs::geographic<bg::degree> > geo_point;
     typedef bgm::point<double, 2, bg::cs::spherical_equatorial<bg::degree> > sph_point;
 
-    bg::strategy::distance::vincenty<bg::srs::spheroid<double> > vi(sph);
-    bg::strategy::distance::andoyer<bg::srs::spheroid<double> > an(sph);
-
     double distance_geo1 = 0;
     double distance_geo2 = 0;
     double distance_geo3 = 0;
+    double distance_geo4 = 0;
     for ( size_t i = 1 ; i < path_geo.size() ; ++i )
     {
         point_info const& pi1 = path_geo[i-1];
         point_info const& pi2 = path_geo[i];
         distance_geo1 += bg::distance(geo_point(pi1.lon, pi1.lat),
                                       geo_point(pi2.lon, pi2.lat),
-                                      vi);
+                                      vincenty);
         distance_geo2 += bg::distance(geo_point(pi1.lon, pi1.lat),
                                       geo_point(pi2.lon, pi2.lat),
-                                      an);
+                                      andoyer);
         distance_geo3 += bg::distance(sph_point(pi1.lon, pi1.lat),
-                                      sph_point(pi2.lon, pi2.lat));
+                                      sph_point(pi2.lon, pi2.lat),
+                                      haversine_mean);
+        distance_geo4 += bg::distance(sph_point(pi1.lon, pi1.lat),
+                                      sph_point(pi2.lon, pi2.lat),
+                                      haversine_max);
     }
 
     double distance_sph1 = 0;
     double distance_sph2 = 0;
     double distance_sph3 = 0;
+    double distance_sph4 = 0;
     for ( size_t i = 1 ; i < path_sph.size() ; ++i )
     {
         point_info const& pi1 = path_sph[i-1];
         point_info const& pi2 = path_sph[i];
         distance_sph1 += bg::distance(geo_point(pi1.lon, pi1.lat),
                                       geo_point(pi2.lon, pi2.lat),
-                                      vi);
+                                      vincenty);
         distance_sph2 += bg::distance(geo_point(pi1.lon, pi1.lat),
                                       geo_point(pi2.lon, pi2.lat),
-                                      an);
+                                      andoyer);
         distance_sph3 += bg::distance(sph_point(pi1.lon, pi1.lat),
-                                      sph_point(pi2.lon, pi2.lat));
+                                      sph_point(pi2.lon, pi2.lat),
+                                      haversine_mean);
+        distance_sph4 += bg::distance(sph_point(pi1.lon, pi1.lat),
+                                      sph_point(pi2.lon, pi2.lat),
+                                      haversine_max);
     }
 
-    std::cout << "(V) - vincenty, (A) - andoyer, (H) - haversine " << std::endl;
+    std::cout << "(V) - vincenty, (A) - andoyer, (H) - haversine (mean radius), (M) - haversine (max radius)" << std::endl;
 
     std::cout << "distance (V) = " << std::setprecision(32)
-              << bg::distance(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), vi) << std::endl;
+              << bg::distance(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), vincenty) << std::endl;
     std::cout << "distance (A) = " << std::setprecision(32)
-              << bg::distance(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), an) << std::endl;
+              << bg::distance(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), andoyer) << std::endl;
     std::cout << "distance (H) = " << std::setprecision(32)
-              << bg::distance(sph_point(lon_s1, lat_s1), sph_point(lon_s2, lat_s2)) << std::endl;
+              << bg::distance(sph_point(lon_s1, lat_s1), sph_point(lon_s2, lat_s2), haversine_mean) << std::endl;
+    std::cout << "distance (M) = " << std::setprecision(32)
+              << bg::distance(sph_point(lon_s1, lat_s1), sph_point(lon_s2, lat_s2), haversine_max) << std::endl;
 
     std::cout << "length geo (V) = " << std::setprecision(32) << distance_geo1 << std::endl;
     std::cout << "length sph (V) = " << std::setprecision(32) << distance_sph1 << std::endl;
@@ -193,6 +207,8 @@ void measure_paths()
     std::cout << "length sph (A) = " << std::setprecision(32) << distance_sph2 << std::endl;
     std::cout << "length geo (H) = " << std::setprecision(32) << distance_geo3 << std::endl;
     std::cout << "length sph (H) = " << std::setprecision(32) << distance_sph3 << std::endl;
+    std::cout << "length geo (M) = " << std::setprecision(32) << distance_geo4 << std::endl;
+    std::cout << "length sph (M) = " << std::setprecision(32) << distance_sph4 << std::endl;
 }
 
 void render_scene(void)
