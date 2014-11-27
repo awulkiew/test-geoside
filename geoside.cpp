@@ -36,7 +36,7 @@ double lat_min = lat_s1 - 30;
 double lon_max = lon_s2 + 30;
 double lat_max = lat_s2 + 30;
 double a = 1;
-double b = 1;
+double b = 0.75;
 bg::srs::spheroid<double> spheroid(a, b);
 
 bg::strategy::distance::vincenty<bg::srs::spheroid<double> > vincenty(spheroid);
@@ -98,14 +98,19 @@ void fill_points()
 
 std::vector<point_info> path_geo;
 std::vector<point_info> path_sph;
+std::vector<point_info> path_car;
 
 void measure_paths()
 {
+    double lin_a = (lat_s2 - lat_s1) / (lon_s2 - lon_s1);
+    double lin_b = lat_s1 - lin_a * lon_s1;
+
     size_t i = 0;
     for ( double y = lat_min ; y <= lat_max ; y += step )
     {
         bool last_left_geo = true;
         bool last_left_sph = true;
+        bool last_left_car = true;
 
         for ( double x = lon_min ; x <= lon_max ; x += step )    
         {
@@ -137,6 +142,15 @@ void measure_paths()
                 {
                     path_sph.push_back(pi);
                     last_left_sph = false;
+                }
+            }
+
+            if ( y < lin_a * x + lin_b || is_s1 )
+            {
+                if ( last_left_car )
+                {
+                    path_car.push_back(pi);
+                    last_left_car = false;
                 }
             }
         }
@@ -190,6 +204,28 @@ void measure_paths()
                                       haversine_max);
     }
 
+    double distance_car1 = 0;
+    double distance_car2 = 0;
+    double distance_car3 = 0;
+    double distance_car4 = 0;
+    for ( size_t i = 1 ; i < path_car.size() ; ++i )
+    {
+        point_info const& pi1 = path_car[i-1];
+        point_info const& pi2 = path_car[i];
+        distance_car1 += bg::distance(geo_point(pi1.lon, pi1.lat),
+                                      geo_point(pi2.lon, pi2.lat),
+                                      vincenty);
+        distance_car2 += bg::distance(geo_point(pi1.lon, pi1.lat),
+                                      geo_point(pi2.lon, pi2.lat),
+                                      andoyer);
+        distance_car3 += bg::distance(sph_point(pi1.lon, pi1.lat),
+                                      sph_point(pi2.lon, pi2.lat),
+                                      haversine_mean);
+        distance_car4 += bg::distance(sph_point(pi1.lon, pi1.lat),
+                                      sph_point(pi2.lon, pi2.lat),
+                                      haversine_max);
+    }
+
     std::cout << "(V) - vincenty, (A) - andoyer, (H) - haversine (mean radius), (M) - haversine (max radius)" << std::endl;
 
     std::cout << "distance (V) = " << std::setprecision(32)
@@ -203,12 +239,16 @@ void measure_paths()
 
     std::cout << "length geo (V) = " << std::setprecision(32) << distance_geo1 << std::endl;
     std::cout << "length sph (V) = " << std::setprecision(32) << distance_sph1 << std::endl;
+    std::cout << "length car (V) = " << std::setprecision(32) << distance_car1 << std::endl;
     std::cout << "length geo (A) = " << std::setprecision(32) << distance_geo2 << std::endl;
     std::cout << "length sph (A) = " << std::setprecision(32) << distance_sph2 << std::endl;
+    std::cout << "length car (A) = " << std::setprecision(32) << distance_car2 << std::endl;
     std::cout << "length geo (H) = " << std::setprecision(32) << distance_geo3 << std::endl;
     std::cout << "length sph (H) = " << std::setprecision(32) << distance_sph3 << std::endl;
+    std::cout << "length car (H) = " << std::setprecision(32) << distance_car3 << std::endl;
     std::cout << "length geo (M) = " << std::setprecision(32) << distance_geo4 << std::endl;
     std::cout << "length sph (M) = " << std::setprecision(32) << distance_sph4 << std::endl;
+    std::cout << "length car (M) = " << std::setprecision(32) << distance_car4 << std::endl;
 }
 
 void render_scene(void)
@@ -274,6 +314,19 @@ void render_scene(void)
     for ( size_t i = 0 ; i < path_sph.size() ; ++i )
     {
         point_info p = path_sph[i];
+
+        double xt = (p.lon - lon_min) * scale_x + disp_x_min;
+        double yt = (p.lat - lat_min) * scale_y + disp_y_min;
+
+        glVertex3f(xt, yt, 0);
+    }
+    glEnd();
+
+    glColor3f(1, 0, 0);
+    glBegin(GL_LINE_STRIP);
+    for ( size_t i = 0 ; i < path_car.size() ; ++i )
+    {
+        point_info p = path_car[i];
 
         double xt = (p.lon - lon_min) * scale_x + disp_x_min;
         double yt = (p.lat - lat_min) * scale_y + disp_y_min;
