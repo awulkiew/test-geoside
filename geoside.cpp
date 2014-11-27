@@ -37,6 +37,7 @@ double lat_max = 50;
 double step = 0.1;
 double a = 1;
 double b = 0.75;
+bg::srs::spheroid<double> sph(a, b);
 
 double disp_x_min = -60;
 double disp_y_min = -60;
@@ -47,8 +48,6 @@ void fill_points()
 {
     typedef bgm::point<double, 2, bg::cs::geographic<bg::degree> > geo_point;
     typedef bgm::point<double, 2, bg::cs::spherical_equatorial<bg::degree> > sph_point;
-
-    bg::srs::spheroid<double> sph(a, b);
 
     bgd::vincenty_inverse<double> vi(lon_s1 * bg::math::d2r,
                                      lat_s1 * bg::math::d2r,
@@ -84,6 +83,82 @@ void fill_points()
             points.push_back(pi);
         }
     }
+}
+
+void measure_paths()
+{
+    std::vector<point_info> path_geo;
+    std::vector<point_info> path_sph;
+
+    size_t i = 0;
+    for ( double x = lon_min ; x <= lon_max ; x += step )
+    {
+        bool last_left_geo = true;
+        bool last_left_sph = true;
+
+        for ( double y = lat_min ; y <= lat_max ; y += step )
+        {
+            point_info pi = points[i++];
+
+            if ( pi.azi_p > pi.azi_s ) // right
+            {
+                if ( last_left_geo )
+                {
+                    path_geo.push_back(pi);
+                    last_left_geo = false;
+                }
+            }
+
+            if ( pi.sph_s < 0 ) // right
+            {
+                if ( last_left_sph )
+                {
+                    path_sph.push_back(pi);
+                    last_left_sph = false;
+                }
+            }
+        }
+    }
+
+
+    typedef bgm::point<double, 2, bg::cs::geographic<bg::degree> > geo_point;
+    typedef bgm::point<double, 2, bg::cs::spherical_equatorial<bg::degree> > sph_point;
+
+    bg::strategy::distance::vincenty<bg::srs::spheroid<double> > vi(sph);
+    bg::strategy::distance::andoyer<bg::srs::spheroid<double> > an(sph);
+
+    double distance_geo1 = 0;
+    double distance_geo2 = 0;
+    for ( size_t i = 1 ; i < path_geo.size() ; ++i )
+    {
+        point_info const& pi1 = path_geo[i-1];
+        point_info const& pi2 = path_geo[i];
+        distance_geo1 += bg::distance(geo_point(pi1.lon, pi1.lat),
+                                      geo_point(pi2.lon, pi2.lat),
+                                      vi);
+        distance_geo2 += bg::distance(geo_point(pi1.lon, pi1.lat),
+                                      geo_point(pi2.lon, pi2.lat),
+                                      an);
+    }
+
+    double distance_sph1 = 0;
+    double distance_sph2 = 0;
+    for ( size_t i = 1 ; i < path_sph.size() ; ++i )
+    {
+        point_info const& pi1 = path_sph[i-1];
+        point_info const& pi2 = path_sph[i];
+        distance_sph1 += bg::distance(geo_point(pi1.lon, pi1.lat),
+                                      geo_point(pi2.lon, pi2.lat),
+                                      vi);
+        distance_sph2 += bg::distance(geo_point(pi1.lon, pi1.lat),
+                                      geo_point(pi2.lon, pi2.lat),
+                                      an);
+    }
+
+    std::cout << "length geo geodesic (V) = " << std::setprecision(32) << distance_geo1 << std::endl;
+    std::cout << "length sph geodesic (V) = " << std::setprecision(32) << distance_sph1 << std::endl;
+    std::cout << "length geo geodesic (A) = " << std::setprecision(32) << distance_geo2 << std::endl;
+    std::cout << "length sph geodesic (A) = " << std::setprecision(32) << distance_sph2 << std::endl;
 }
 
 void render_scene(void)
@@ -178,6 +253,8 @@ int main(int argc, char **argv)
 {
     std::cout << "filling points" << std::endl;
     fill_points();
+    std::cout << "measuring paths" << std::endl;
+    measure_paths();
     std::cout << "visualizing" << std::endl;
 
     glutInit(&argc, argv);
