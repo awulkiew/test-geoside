@@ -129,6 +129,7 @@ void measure_paths()
 
     double distance_geo1 = 0;
     double distance_geo2 = 0;
+    double distance_geo3 = 0;
     for ( size_t i = 1 ; i < path_geo.size() ; ++i )
     {
         point_info const& pi1 = path_geo[i-1];
@@ -139,10 +140,13 @@ void measure_paths()
         distance_geo2 += bg::distance(geo_point(pi1.lon, pi1.lat),
                                       geo_point(pi2.lon, pi2.lat),
                                       an);
+        distance_geo3 += bg::distance(sph_point(pi1.lon, pi1.lat),
+                                      sph_point(pi2.lon, pi2.lat));
     }
 
     double distance_sph1 = 0;
     double distance_sph2 = 0;
+    double distance_sph3 = 0;
     for ( size_t i = 1 ; i < path_sph.size() ; ++i )
     {
         point_info const& pi1 = path_sph[i-1];
@@ -153,12 +157,16 @@ void measure_paths()
         distance_sph2 += bg::distance(geo_point(pi1.lon, pi1.lat),
                                       geo_point(pi2.lon, pi2.lat),
                                       an);
+        distance_sph3 += bg::distance(sph_point(pi1.lon, pi1.lat),
+                                      sph_point(pi2.lon, pi2.lat));
     }
 
     std::cout << "length geo geodesic (V) = " << std::setprecision(32) << distance_geo1 << std::endl;
     std::cout << "length sph geodesic (V) = " << std::setprecision(32) << distance_sph1 << std::endl;
     std::cout << "length geo geodesic (A) = " << std::setprecision(32) << distance_geo2 << std::endl;
     std::cout << "length sph geodesic (A) = " << std::setprecision(32) << distance_sph2 << std::endl;
+    std::cout << "length geo geodesic (H) = " << std::setprecision(32) << distance_geo3 << std::endl;
+    std::cout << "length sph geodesic (H) = " << std::setprecision(32) << distance_sph3 << std::endl;
 }
 
 void render_scene(void)
