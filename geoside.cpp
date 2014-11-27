@@ -20,23 +20,23 @@ void normalize(T & a)
 
 struct point_info
 {
-    double lon, lat, azi_s, azi_p;
+    double lon, lat, azi_s, azi_p, azi_s_bck, azi_p_bck;
     int sph_s;
 };
 
 std::vector<point_info> points;
 
-double lon_s1 = -51;
-double lat_s1 = -51;
-double lon_s2 = 51;
-double lat_s2 = 51;
+double lon_s1 = -31;
+double lat_s1 = -31;
+double lon_s2 = 31;
+double lat_s2 = 31;
 double step = 0.2;
-double lon_min = lon_s1;
-double lat_min = lat_s1;
-double lon_max = lon_s2;
-double lat_max = lat_s2;
+double lon_min = lon_s1 - 30;
+double lat_min = lat_s1 - 30;
+double lon_max = lon_s2 + 30;
+double lat_max = lat_s2 + 30;
 double a = 1;
-double b = 0.75;
+double b = 0.5;
 bg::srs::spheroid<double> sph(a, b);
 
 double disp_x_min = -60;
@@ -56,6 +56,8 @@ void fill_points()
                                      sph);
     double fwd = vi.azimuth12();
     normalize(fwd);
+    double bck = vi.azimuth21();
+    normalize(bck);
 
     for ( double y = lat_min ; y <= lat_max ; y += step )
     {
@@ -69,6 +71,8 @@ void fill_points()
 
             double fwd2 = vi2.azimuth12();
             normalize(fwd2);
+            double bck2 = vi2.azimuth21();
+            normalize(bck2);
 
             bg::strategy::side::spherical_side_formula<double> ssf;
             int ss = ssf.apply(sph_point(lon_s1, lat_s1), sph_point(lon_s2, lat_s2), sph_point(x, y));
@@ -78,6 +82,8 @@ void fill_points()
             pi.lat = y;
             pi.azi_s = fwd;
             pi.azi_p = fwd2;
+            pi.azi_s_bck = bck;
+            pi.azi_p_bck = bck2;
             pi.sph_s = ss;
 
             points.push_back(pi);
@@ -100,9 +106,18 @@ void measure_paths()
         {
             point_info pi = points[i++];
 
+            if ( x < lon_s1 || x > lon_s2 || y < lat_s1 || y > lat_s2 )
+            {
+                continue;
+            }
+
             bool is_s1 = lon_s1 == pi.lon && lat_s1 == pi.lat;
 
-            if ( pi.azi_p > pi.azi_s || is_s1 ) // right
+            bool is_geo_right = ::sin(pi.azi_p-pi.azi_s) >= 0;
+            bool is_geo_bck_right = ::sin(pi.azi_p_bck-pi.azi_s_bck) <= 0;
+            bool is_sph_right = pi.sph_s < 0;
+
+            if ( is_geo_right || is_s1 ) // right
             {
                 if ( last_left_geo )
                 {
@@ -111,7 +126,7 @@ void measure_paths()
                 }
             }
 
-            if ( pi.sph_s < 0 || is_s1 ) // right
+            if ( is_sph_right || is_s1 ) // right
             {
                 if ( last_left_sph )
                 {
@@ -172,12 +187,12 @@ void measure_paths()
     std::cout << "distance (H) = " << std::setprecision(32)
               << bg::distance(sph_point(lon_s1, lat_s1), sph_point(lon_s2, lat_s2)) << std::endl;
 
-    std::cout << "length geo geodesic (V) = " << std::setprecision(32) << distance_geo1 << std::endl;
-    std::cout << "length sph geodesic (V) = " << std::setprecision(32) << distance_sph1 << std::endl;
-    std::cout << "length geo geodesic (A) = " << std::setprecision(32) << distance_geo2 << std::endl;
-    std::cout << "length sph geodesic (A) = " << std::setprecision(32) << distance_sph2 << std::endl;
-    std::cout << "length geo geodesic (H) = " << std::setprecision(32) << distance_geo3 << std::endl;
-    std::cout << "length sph geodesic (H) = " << std::setprecision(32) << distance_sph3 << std::endl;
+    std::cout << "length geo (V) = " << std::setprecision(32) << distance_geo1 << std::endl;
+    std::cout << "length sph (V) = " << std::setprecision(32) << distance_sph1 << std::endl;
+    std::cout << "length geo (A) = " << std::setprecision(32) << distance_geo2 << std::endl;
+    std::cout << "length sph (A) = " << std::setprecision(32) << distance_sph2 << std::endl;
+    std::cout << "length geo (H) = " << std::setprecision(32) << distance_geo3 << std::endl;
+    std::cout << "length sph (H) = " << std::setprecision(32) << distance_sph3 << std::endl;
 }
 
 void render_scene(void)
@@ -199,20 +214,17 @@ void render_scene(void)
         {
             point_info pi = points[i++];
 
-            if ( pi.azi_p > pi.azi_s ) // right
-            {
-                if ( pi.sph_s < 0 ) // right
-                    glColor3f(0.25, 0, 0);
-                else
-                    glColor3f(1, 0, 1);
-            }
-            else // left
-            {
-                if ( pi.sph_s > 0 ) // left
-                    glColor3f(0, 0.25, 0);
-                else
-                    glColor3f(0, 1, 1);
-            }
+            bool is_geo_right = ::sin(pi.azi_p-pi.azi_s) >= 0;
+            bool is_geo_bck_right = ::sin(pi.azi_p_bck-pi.azi_s_bck) <= 0;
+            bool is_sph_right = pi.sph_s < 0;
+
+            float r = 0.25f, g = 0.25f, b = 0.25f;
+
+            r += is_geo_right ? 0.5f : 0.0f;
+            g += is_sph_right ? 0.5f : 0.0f;
+            //b += is_geo_bck_right ? 0.5f : 0.0f;
+
+            glColor3f(r, g, b);
             
             double xt = (x - lon_min) * scale_x + disp_x_min;
             double yt = (y - lat_min) * scale_y + disp_y_min;
@@ -241,7 +253,7 @@ void render_scene(void)
     }
     glEnd();
 
-    glColor3f(1, 1, 0);
+    glColor3f(0, 0, 1);
     glBegin(GL_LINE_STRIP);
     for ( size_t i = 0 ; i < path_sph.size() ; ++i )
     {
