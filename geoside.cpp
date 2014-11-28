@@ -1,6 +1,8 @@
 #include <GL/glut.h>
 
 #include <boost/geometry.hpp>
+#include <boost/geometry/geometries/register/point.hpp>
+#include <boost/geometry/geometries/linestring.hpp>
 
 #include <iostream>
 #include <vector>
@@ -23,6 +25,8 @@ struct point_info
     double lon, lat, azi_s, azi_p, azi_s_bck, azi_p_bck;
     int sph_s, car_s;
 };
+// for simplify
+BOOST_GEOMETRY_REGISTER_POINT_2D(point_info, double, bg::cs::cartesian, lon, lat)
 
 std::vector<point_info> points;
 
@@ -30,7 +34,7 @@ double lon_s1 = -31;
 double lat_s1 = -31;
 double lon_s2 = 31;
 double lat_s2 = 31;
-double step = 0.2;
+double step = 0.1;
 double lon_min = lon_s1 - 30;
 double lat_min = lat_s1 - 30;
 double lon_max = lon_s2 + 30;
@@ -101,9 +105,9 @@ void fill_points()
     }
 }
 
-std::vector<point_info> path_geo;
-std::vector<point_info> path_sph;
-std::vector<point_info> path_car;
+bg::model::linestring<point_info> path_geo;
+bg::model::linestring<point_info> path_sph;
+bg::model::linestring<point_info> path_car;
 
 void measure_paths()
 {
@@ -168,6 +172,13 @@ void measure_paths()
         }
     }
 
+    bg::model::linestring<point_info> temp;
+    bg::simplify(path_geo, temp, step);
+    path_geo = temp;
+    bg::simplify(path_sph, temp, step);
+    path_sph = temp;
+    bg::simplify(path_car, temp, step);
+    path_car = temp;
 
     typedef bgm::point<double, 2, bg::cs::geographic<bg::degree> > geo_point;
     typedef bgm::point<double, 2, bg::cs::spherical_equatorial<bg::degree> > sph_point;
