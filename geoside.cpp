@@ -21,7 +21,7 @@ void normalize(T & a)
 struct point_info
 {
     double lon, lat, azi_s, azi_p, azi_s_bck, azi_p_bck;
-    int sph_s;
+    int sph_s, car_s;
 };
 
 std::vector<point_info> points;
@@ -53,6 +53,7 @@ void fill_points()
 {
     typedef bgm::point<double, 2, bg::cs::geographic<bg::degree> > geo_point;
     typedef bgm::point<double, 2, bg::cs::spherical_equatorial<bg::degree> > sph_point;
+    typedef bgm::point<double, 2, bg::cs::cartesian> car_point;
 
     bgd::vincenty_inverse<double> vi(lon_s1 * bg::math::d2r,
                                      lat_s1 * bg::math::d2r,
@@ -82,6 +83,9 @@ void fill_points()
             bg::strategy::side::spherical_side_formula<double> ssf;
             int ss = ssf.apply(sph_point(lon_s1, lat_s1), sph_point(lon_s2, lat_s2), sph_point(x, y));
 
+            bg::strategy::side::side_by_triangle<> sbt;
+            int cs = sbt.apply(car_point(lon_s1, lat_s1), car_point(lon_s2, lat_s2), car_point(x, y));
+
             point_info pi;
             pi.lon = x;
             pi.lat = y;
@@ -90,6 +94,7 @@ void fill_points()
             pi.azi_s_bck = bck;
             pi.azi_p_bck = bck2;
             pi.sph_s = ss;
+            pi.car_s = cs;
 
             points.push_back(pi);
         }
@@ -126,6 +131,7 @@ void measure_paths()
             bool is_geo_right = ::sin(pi.azi_p-pi.azi_s) >= 0;
             bool is_geo_bck_right = ::sin(pi.azi_p_bck-pi.azi_s_bck) <= 0;
             bool is_sph_right = pi.sph_s < 0;
+            bool is_car_right = pi.car_s < 0;
 
             if ( is_geo_right || is_s1 ) // right
             {
@@ -145,8 +151,14 @@ void measure_paths()
                 }
             }
 
-            if ( y < lin_a * x + lin_b || is_s1 )
+            if ( is_car_right || is_s1 )
             {
+                // sanity check
+                if ( !(y < lin_a * x + lin_b) )
+                {
+                    std::cerr << "Error: cartesian right not compatible with line equation." << std::endl;
+                }
+
                 if ( last_left_car )
                 {
                     path_car.push_back(pi);
