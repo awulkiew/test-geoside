@@ -40,13 +40,15 @@ double lat_min = lat_s1 - 30;
 double lon_max = lon_s2 + 30;
 double lat_max = lat_s2 + 30;
 double a = 1;
-double b = 0.75;
+double b = 1 - 1.0/300;
 bg::srs::spheroid<double> spheroid(a, b);
 
 bg::strategy::distance::vincenty<bg::srs::spheroid<double> > vincenty(spheroid);
 bg::strategy::distance::andoyer<bg::srs::spheroid<double> > andoyer(spheroid);
 bg::strategy::distance::haversine<double> haversine_mean((2*a+b)/3);
 bg::strategy::distance::haversine<double> haversine_max(a);
+
+double simplify_distance = 0.066;
 
 double disp_x_min = -60;
 double disp_y_min = -60;
@@ -124,13 +126,19 @@ void measure_paths()
         for ( double x = lon_min ; x <= lon_max ; x += step )    
         {
             point_info pi = points[i++];
-
+            
             if ( x < lon_s1 || x > lon_s2 || y < lat_s1 || y > lat_s2 )
             {
                 continue;
             }
 
             bool is_s1 = lon_s1 == pi.lon && lat_s1 == pi.lat;
+            bool is_s2 = lon_s2 == pi.lon && lat_s2 == pi.lat;
+
+            if ( !is_s1 && !is_s2 )
+            {
+                pi.lon -= step/2; // the coordinate between left and right point
+            }
 
             bool is_geo_right = ::sin(pi.azi_p-pi.azi_s) >= 0;
             bool is_geo_bck_right = ::sin(pi.azi_p_bck-pi.azi_s_bck) <= 0;
@@ -173,11 +181,21 @@ void measure_paths()
     }
 
     bg::model::linestring<point_info> temp;
-    bg::simplify(path_geo, temp, step);
+    bg::simplify(path_geo, temp, simplify_distance);
     path_geo = temp;
-    bg::simplify(path_sph, temp, step);
+    bg::simplify(path_sph, temp, simplify_distance);
     path_sph = temp;
-    bg::simplify(path_car, temp, step);
+    // simplify cartesian path but make sure that it contain similar number of points
+    std::size_t count = path_car.size() / (std::min)(path_geo.size(), path_sph.size());
+    temp.clear();
+    for ( size_t i = 0 ; i < path_car.size() ; i += count )
+    {
+        temp.push_back(path_car[i]);
+    }
+    if ( temp.back().lon != path_car.back().lon || temp.back().lat != path_car.back().lat )
+    {
+        temp.push_back(path_car.back());
+    }
     path_car = temp;
 
     typedef bgm::point<double, 2, bg::cs::geographic<bg::degree> > geo_point;
