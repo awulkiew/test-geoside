@@ -4,6 +4,10 @@
 #include <boost/geometry/geometries/register/point.hpp>
 #include <boost/geometry/geometries/linestring.hpp>
 
+#include <boost/geometry/strategies/geographic/mapping_ssf.hpp>
+
+#include <boost/array.hpp>
+
 #include <iostream>
 #include <vector>
 
@@ -86,8 +90,42 @@ void fill_points()
             double bck2 = vi2.azimuth21();
             normalize(bck2);
 
+            boost::array<int, 4> ss;
+
             bg::strategy::side::spherical_side_formula<double> ssf;
-            int ss = ssf.apply(sph_point(lon_s1, lat_s1), sph_point(lon_s2, lat_s2), sph_point(x, y));
+            ss[0] = ssf.apply(sph_point(lon_s1, lat_s1), sph_point(lon_s2, lat_s2), sph_point(x, y));
+
+            bg::strategy::side::mapping_spherical_side_formula
+                <
+                    bg::srs::spheroid<double>,
+                    bg::strategy::side::mapping_geodetic
+                > ssf1(spheroid);
+            ss[1] = ssf1.apply(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), geo_point(x, y));
+
+            bg::strategy::side::mapping_spherical_side_formula
+                <
+                    bg::srs::spheroid<double>,
+                    bg::strategy::side::mapping_reduced
+                > ssf2(spheroid);
+            ss[2] = ssf2.apply(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), geo_point(x, y));
+
+            bg::strategy::side::mapping_spherical_side_formula
+                <
+                    bg::srs::spheroid<double>,
+                    bg::strategy::side::mapping_geocentric
+                > ssf3(spheroid);
+            ss[3] = ssf3.apply(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), geo_point(x, y));
+
+            for(int i = 0 ; i < 4 ; ++i)
+            {
+                for(int j = 1 ; j < 4 ; ++j)
+                {
+                    if ( ss[i] != ss[j] )
+                    {
+                        std::cout << "different SSF res for: " << i << " and " << j << std::endl;
+                    }
+                }
+            }
 
             bg::strategy::side::side_by_triangle<> sbt;
             int cs = sbt.apply(car_point(lon_s1, lat_s1), car_point(lon_s2, lat_s2), car_point(x, y));
@@ -99,10 +137,12 @@ void fill_points()
             pi.azi_p = fwd2;
             pi.azi_s_bck = bck;
             pi.azi_p_bck = bck2;
-            pi.sph_s = ss;
+            pi.sph_s = ss[0];
             pi.car_s = cs;
 
             points.push_back(pi);
+
+            boost::ignore_unused(sbt, ssf);
         }
     }
 }
@@ -141,7 +181,7 @@ void measure_paths()
             }
 
             bool is_geo_right = ::sin(pi.azi_p-pi.azi_s) >= 0;
-            bool is_geo_bck_right = ::sin(pi.azi_p_bck-pi.azi_s_bck) <= 0;
+            //bool is_geo_bck_right = ::sin(pi.azi_p_bck-pi.azi_s_bck) <= 0;
             bool is_sph_right = pi.sph_s < 0;
             bool is_car_right = pi.car_s < 0;
 
@@ -312,7 +352,7 @@ void render_scene(void)
             point_info pi = points[i++];
 
             bool is_geo_right = ::sin(pi.azi_p-pi.azi_s) >= 0;
-            bool is_geo_bck_right = ::sin(pi.azi_p_bck-pi.azi_s_bck) <= 0;
+            //bool is_geo_bck_right = ::sin(pi.azi_p_bck-pi.azi_s_bck) <= 0;
             bool is_sph_right = pi.sph_s < 0;
 
             float r = 0.25f, g = 0.25f, b = 0.25f;
@@ -408,11 +448,11 @@ void resize(int w, int h)
     glLineWidth(1.5f);
 }
 
-void mouse(int button, int state, int /*x*/, int /*y*/)
+void mouse(int /*button*/, int /*state*/, int /*x*/, int /*y*/)
 {
 }
 
-void keyboard(unsigned char key, int /*x*/, int /*y*/)
+void keyboard(unsigned char /*key*/, int /*x*/, int /*y*/)
 {
 }
 
