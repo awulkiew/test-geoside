@@ -110,6 +110,10 @@ void draw_meridian(double lon, double step = pi/32)
         double x = a * cos_lat * cos(lon);
         double y = a * cos_lat * sin(lon);
         double z = b * sin(lat);
+
+        double eq = (x*x+y*y)/(a*a) + z*z/(b*b);
+        assert(bg::math::equals(eq, 1.0));
+
         glVertex3f(x, y, z);
     }
     glEnd();
@@ -124,6 +128,10 @@ void draw_parallel(double lat, double step = pi/32)
         double x = a * cos_lat * cos(lon);
         double y = a * cos_lat * sin(lon);
         double z = b * sin(lat);
+
+        double eq = (x*x+y*y)/(a*a) + z*z/(b*b);
+        assert(bg::math::equals(eq, 1.0));
+
         glVertex3f(x, y, z);
     }
     glEnd();
@@ -241,7 +249,7 @@ void render_scene()
 
 
     point_geo p1(60, 30);
-    point_geo p2(30, 30);
+    point_geo p2(30, 10);
 
     draw_point_adv(p1, color(1, 0.5, 0));
     draw_point_adv(p2, color(1, 1, 0));
@@ -282,9 +290,11 @@ void render_scene()
         double dy = bg::get<1>(d);
         double dz = bg::get<2>(d);
 
-        double param_a = (dx*dx+dy*dy)/a+dz*dz/b;
-        double param_b = 2*((ox*dx+oy*dy)/a+oz*dz/b);
-        double param_c = (ox*ox+oy*oy)/a+oz*oz/b-1;
+        double a_sqr = a*a;
+        double b_sqr = b*b;
+        double param_a = (dx*dx+dy*dy)/a_sqr+dz*dz/b_sqr;
+        double param_b = 2*((ox*dx+oy*dy)/a_sqr+oz*dz/b_sqr);
+        double param_c = (ox*ox+oy*oy)/a_sqr+oz*oz/b_sqr-1;
 
         double delta = param_b*param_b-4*param_a*param_c;
         double t = delta >= 0 ?
