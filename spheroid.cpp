@@ -295,6 +295,7 @@ void render_scene()
     
     std::vector<point_3d> curve;
     std::vector<point_3d> curve_mapped;
+    std::vector<point_3d> curve_geocentric;
 
     double f = 0;
     int count = 50;
@@ -346,6 +347,27 @@ void render_scene()
         
         curve.push_back(p_curve);
 
+        // geocentric
+        {
+            double dx = bg::get<0>(ps);
+            double dy = bg::get<1>(ps);
+            double dz = bg::get<2>(ps);
+
+            double a_sqr = a*a;
+            double b_sqr = b*b;
+            double param_a = (dx*dx+dy*dy)/a_sqr+dz*dz/b_sqr;
+            double param_c = -1;
+
+            double delta = -4*param_a*param_c;
+            double t = delta >= 0 ?
+                       sqrt(delta) / (2*param_a) :
+                       0.0;
+
+            point_3d p_curve_geocentric = ps * t;
+
+            curve_geocentric.push_back(p_curve_geocentric);
+        }
+
         // mapped to spherical
         {
             point_sph p1_m = pcast<point_sph>(p1);
@@ -391,11 +413,14 @@ void render_scene()
     f = f_step;
     for ( int i = 1 ; i <= count ; ++i, f += f_step )
     {
-        glColor3f(1, 0.5+0.5*f, 1);
+        glColor3f(0.5+0.5*f, 0, 0);
         draw_line(curve[i-1], curve[i]);
 
-        glColor3f(0.5+0.5*f, 0, 1);
+        glColor3f(0, 0.5+0.5*f, 0);
         draw_line(curve_mapped[i-1], curve_mapped[i]);
+
+        glColor3f(0, 0, 0.5+0.5*f);
+        draw_line(curve_geocentric[i-1], curve_geocentric[i]);
     }
 
 
