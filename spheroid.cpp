@@ -248,8 +248,8 @@ void render_scene()
     draw_model();
 
 
-    point_geo p1(60, 30);
-    point_geo p2(30, 10);
+    point_geo p1(-60, -60);
+    point_geo p2(60, 60);
 
     draw_point_adv(p1, color(1, 0.5, 0));
     draw_point_adv(p2, color(1, 1, 0));
@@ -269,7 +269,9 @@ void render_scene()
     std::vector<point_3d> curve;
 
     double f = 0;
-    for ( int i = 0 ; i <= 10 ; ++i, f += 0.1 )
+    int count = 50;
+    double f_step = 1.0 / count;
+    for ( int i = 0 ; i <= count ; ++i, f += f_step )
     {
         point_3d pe = p01_3d + v_equator * f;
         point_3d ps = p1_3d + v_surface * f;
@@ -306,8 +308,8 @@ void render_scene()
         curve.push_back(p_curve);
     }
 
-    f = 0.1;
-    for ( int i = 1 ; i <= 10 ; ++i, f += 0.1 )
+    f = f_step;
+    for ( int i = 1 ; i <= count ; ++i, f += f_step )
     {
         glColor3f(1, 0.5+0.5*f, 1);
         draw_line(curve[i-1], curve[i]);
