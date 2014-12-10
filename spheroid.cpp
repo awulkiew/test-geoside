@@ -33,16 +33,43 @@ struct color
     float r, g, b, a;
 };
 
-template <typename P>
-void convert(P const& p, point_3d & res)
+void convert(point_geo const& p, point_3d & res)
 {
-    typedef typename bg::coordinate_type<P>::type ct;
-    ct lon = bg::get_as_radian<0>(p);
-    ct lat = bg::get_as_radian<1>(p);
-    ct cos_lat = cos(lat);
+    double lon = bg::get_as_radian<0>(p);
+    double lat = bg::get_as_radian<1>(p);
+    double cos_lat = cos(lat);
     bg::set<0>(res, a * cos_lat * cos(lon));
     bg::set<1>(res, a * cos_lat * sin(lon));
     bg::set<2>(res, b * sin(lat));
+}
+
+void convert(point_sph const& p, point_3d & res)
+{
+    double lon = bg::get_as_radian<0>(p);
+    double lat = bg::get_as_radian<1>(p);
+    double cos_lat = cos(lat);
+    bg::set<0>(res, a * cos_lat * cos(lon));
+    bg::set<1>(res, a * cos_lat * sin(lon));
+    bg::set<2>(res, a * sin(lat));
+}
+
+void convert(point_3d const& p, point_sph & res)
+{
+    double r = sqrt(bg::dot_product(p, p));
+    bg::set_from_radian<0>(res, atan2(bg::get<1>(p), bg::get<0>(p)));
+    bg::set_from_radian<1>(res, asin(bg::get<2>(p) / r));
+}
+
+void convert(point_geo const& p, point_sph & res)
+{
+    bg::set<0>(res, bg::get<0>(p));
+    bg::set<1>(res, bg::get<1>(p));
+}
+
+void convert(point_sph const& p, point_geo & res)
+{
+    bg::set<0>(res, bg::get<0>(p));
+    bg::set<1>(res, bg::get<1>(p));
 }
 
 void convert(point_3d const& p, point_3d & res)
@@ -54,7 +81,7 @@ template <typename Res, typename P>
 Res pcast(P const& p)
 {
     Res res;
-    convert(p, res);
+    ::convert(p, res);
     return res;
 }
 
@@ -68,7 +95,7 @@ point_geo projected_to_equator(point_geo const& p)
 point_3d projected_to_xy(point_geo const& p)
 {
     point_3d res;
-    convert(p, res);
+    ::convert(p, res);
     bg::set<2>(res, 0);
     return res;
 }
@@ -80,7 +107,7 @@ point_3d projected_to_xy_geod(point_geo const& p)
     double lat = bg::get_as_radian<1>(p);
 
     point_3d p3d;
-    convert(p, p3d);
+    ::convert(p, p3d);
 
     // lat == 0
     if ( bg::math::equals(bg::get<2>(p3d), 0) )
@@ -91,7 +118,7 @@ point_3d projected_to_xy_geod(point_geo const& p)
     // sqrt(xx+yy) - |z|/tan(lat)
     else
         r = bg::math::sqrt(bg::get<0>(p3d) * bg::get<0>(p3d) + bg::get<1>(p3d) * bg::get<1>(p3d))
-            - bg::math::abs(bg::get<2>(p3d)) / tan(lat);
+            - bg::math::abs(bg::get<2>(p3d) / tan(lat));
 
     point_3d res;
     bg::set<0>(res, r * cos(lon));
@@ -112,7 +139,7 @@ void draw_meridian(double lon, double step = pi/32)
         double z = b * sin(lat);
 
         double eq = (x*x+y*y)/(a*a) + z*z/(b*b);
-        assert(bg::math::equals(eq, 1.0));
+        //assert(bg::math::equals(eq, 1.0));
 
         glVertex3f(x, y, z);
     }
@@ -130,7 +157,7 @@ void draw_parallel(double lat, double step = pi/32)
         double z = b * sin(lat);
 
         double eq = (x*x+y*y)/(a*a) + z*z/(b*b);
-        assert(bg::math::equals(eq, 1.0));
+        //assert(bg::math::equals(eq, 1.0));
 
         glVertex3f(x, y, z);
     }
@@ -156,7 +183,7 @@ template <typename P>
 void draw_point(P const& p)
 {
     point_3d p3d;
-    convert(p, p3d);
+    ::convert(p, p3d);
     draw_point(p3d);
 }
 
@@ -172,8 +199,8 @@ template <typename P1, typename P2>
 void draw_line(P1 const& p1, P2 const& p2)
 {
     point_3d p3d1, p3d2;
-    convert(p1, p3d1);
-    convert(p2, p3d2);
+    ::convert(p1, p3d1);
+    ::convert(p2, p3d2);
     draw_line(p3d1, p3d2);
 }
 
@@ -267,21 +294,33 @@ void render_scene()
     draw_line(p01_3d, p02_3d);
     
     std::vector<point_3d> curve;
+    std::vector<point_3d> curve_mapped;
 
     double f = 0;
     int count = 50;
     double f_step = 1.0 / count;
     for ( int i = 0 ; i <= count ; ++i, f += f_step )
     {
-        point_3d pe = p01_3d + v_equator * f;
         point_3d ps = p1_3d + v_surface * f;
-        
+
+#define CALCULATE_NEAREST
+#if defined(CALCULATE_NEAREST)
+
+        double nt = - bg::dot_product(p01_3d - ps, p02_3d - p01_3d) / bg::dot_product(v_equator, v_equator);
+        point_3d pe = p01_3d + v_equator * nt;
+
+#elif defined(INTERPOLATE_BOTH)
+
+        point_3d pe = p01_3d + v_equator * f;
+
+#endif
+
         glColor3f(1, 0.5+0.5*f, 0);
         draw_line(pe, ps);
 
         point_3d d = ps - pe;
         
-        //(x*x+y*y) / a + z*z/b = 1
+        //(x*x+y*y)/(a*a) + z*z/(b*b) = 1
         // x = o.x + d.x * t
         // y = o.y + d.y * t
         // z = o.z + d.z * t        
@@ -306,6 +345,47 @@ void render_scene()
         point_3d p_curve = pe + d * t;
         
         curve.push_back(p_curve);
+
+        // mapped to spherical
+        {
+            point_sph p1_m = pcast<point_sph>(p1);
+            point_sph p2_m = pcast<point_sph>(p2);
+            point_3d p1_mc = pcast<point_3d>(p1_m);
+            point_3d p2_mc = pcast<point_3d>(p2_m);
+            point_3d v_mc = p2_mc - p1_mc;
+
+            point_3d curr_v_mc = p1_mc + v_mc * f;
+
+            //glColor3f(0, 1, 0);
+            //draw_line(point_3d(0, 0, 0), curr_v_mc);
+
+            //x*x+y*y+z*z = a*a
+            double dx = bg::get<0>(curr_v_mc);
+            double dy = bg::get<1>(curr_v_mc);
+            double dz = bg::get<2>(curr_v_mc);
+
+            double param_a = dx*dx+dy*dy+dz*dz;
+            double param_c = -a*a;
+
+            double delta = -4*param_a*param_c;
+            double t = delta >= 0 ?
+                       sqrt(delta) / (2*param_a) :
+                       0.0;
+
+            point_3d p_curve_mc = curr_v_mc * t;
+
+            //glColor3f(0, 0, 1);
+            //draw_line(point_3d(0, 0, 0), p_curve_mc);
+
+            point_sph p_curve_m = pcast<point_sph>(p_curve_mc);
+            point_geo p_curve = pcast<point_geo>(p_curve_m);
+            point_3d p_curve_3d = pcast<point_3d>(p_curve);
+
+            //glColor3f(1, 0, 0);
+            //draw_line(point_3d(0, 0, 0), p_curve_3d);
+
+            curve_mapped.push_back(p_curve_3d);
+        }
     }
 
     f = f_step;
@@ -313,7 +393,11 @@ void render_scene()
     {
         glColor3f(1, 0.5+0.5*f, 1);
         draw_line(curve[i-1], curve[i]);
+
+        glColor3f(0.5+0.5*f, 0, 1);
+        draw_line(curve_mapped[i-1], curve_mapped[i]);
     }
+
 
     glPopMatrix();
     glFlush();
