@@ -3,8 +3,6 @@
 #include <boost/geometry.hpp>
 #include <boost/geometry/geometries/register/point.hpp>
 
-#include <boost/geometry/strategies/geographic/ssf.hpp>
-
 #include <iostream>
 #include <vector>
 
@@ -42,9 +40,9 @@ void convert(P const& p, point_3d & res)
     ct lon = bg::get_as_radian<0>(p);
     ct lat = bg::get_as_radian<1>(p);
     ct cos_lat = cos(lat);
-    bg::set<0>(res, bg::get_radius<0>(sph) * cos_lat * cos(lon));
-    bg::set<1>(res, bg::get_radius<0>(sph) * cos_lat * sin(lon));
-    bg::set<2>(res, bg::get_radius<2>(sph) * sin(lat));
+    bg::set<0>(res, a * cos_lat * cos(lon));
+    bg::set<1>(res, a * cos_lat * sin(lon));
+    bg::set<2>(res, b * sin(lat));
 }
 
 void convert(point_3d const& p, point_3d & res)
@@ -143,7 +141,7 @@ void draw_sphere(double x, double y, double z, double r)
 
 void draw_point(point_3d const& p)
 {
-    draw_sphere(bg::get<0>(p), bg::get<1>(p), bg::get<2>(p), 0.03);
+    draw_sphere(bg::get<0>(p), bg::get<1>(p), bg::get<2>(p), 0.02);
 }
 
 template <typename P>
@@ -220,23 +218,92 @@ void draw_point_adv(point_geo const& p, color const& c)
     draw_line(p_xy_geod, p);
 }
 
-void render_scene(void)
+point_3d operator+(point_3d const& p1, point_3d const& p2) { point_3d res = p1; bg::add_point(res, p2); return res; }
+point_3d operator-(point_3d const& p1, point_3d const& p2) { point_3d res = p1; bg::subtract_point(res, p2); return res; }
+point_3d operator*(point_3d const& p1, double v) { point_3d res = p1; bg::multiply_value(res, v); return res; }
+point_3d operator/(point_3d const& p1, double v) { point_3d res = p1; bg::divide_value(res, v); return res; }
+
+float yaw = 0;
+float pitch = 0;
+float zoom = 0;
+
+void render_scene()
 {
+    glPushMatrix();
+
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    
+    glTranslatef(zoom, zoom, zoom);
+    glRotatef(pitch, -0.7, 0.7, 0);
+    glRotatef(yaw, 0, 0, 1);
 
     draw_model();
 
-    draw_point_adv(point_geo(60, 30), color(1, 0.5, 0));
-    draw_point_adv(point_geo(30, 10), color(1, 1, 0));
 
-//    glColor4f(0, 0, 0, 0.5);
-//    glBegin(GL_QUADS);
-//    glVertex3f(-1, -1, -0.001);
-//    glVertex3f(1, -1, -0.001);
-//    glVertex3f(1, 1, -0.001);
-//    glVertex3f(-1, 1, -0.001);
-//    glEnd();
+    point_geo p1(60, 30);
+    point_geo p2(30, 30);
 
+    draw_point_adv(p1, color(1, 0.5, 0));
+    draw_point_adv(p2, color(1, 1, 0));
+
+    point_3d p1_3d = pcast<point_3d>(p1);
+    point_3d p2_3d = pcast<point_3d>(p2);
+    point_3d p01_3d = projected_to_xy_geod(p1);
+    point_3d p02_3d = projected_to_xy_geod(p2);
+
+    point_3d v_surface = p2_3d - p1_3d;
+    point_3d v_equator = p02_3d - p01_3d;
+
+    glColor3f(1, 1, 1);
+    draw_line(p1_3d, p2_3d);
+    draw_line(p01_3d, p02_3d);
+    
+    std::vector<point_3d> curve;
+
+    double f = 0;
+    for ( int i = 0 ; i <= 10 ; ++i, f += 0.1 )
+    {
+        point_3d pe = p01_3d + v_equator * f;
+        point_3d ps = p1_3d + v_surface * f;
+        
+        glColor3f(1, 0.5+0.5*f, 0);
+        draw_line(pe, ps);
+
+        point_3d d = ps - pe;
+        
+        //(x*x+y*y) / a + z*z/b = 1
+        // x = o.x + d.x * t
+        // y = o.y + d.y * t
+        // z = o.z + d.z * t        
+        double ox = bg::get<0>(pe);
+        double oy = bg::get<1>(pe);
+        double oz = bg::get<2>(pe);
+        double dx = bg::get<0>(d);
+        double dy = bg::get<1>(d);
+        double dz = bg::get<2>(d);
+
+        double param_a = (dx*dx+dy*dy)/a+dz*dz/b;
+        double param_b = 2*((ox*dx+oy*dy)/a+oz*dz/b);
+        double param_c = (ox*ox+oy*oy)/a+oz*oz/b-1;
+
+        double delta = param_b*param_b-4*param_a*param_c;
+        double t = delta >= 0 ?
+                   (-param_b+sqrt(delta)) / (2*param_a) :
+                   0.0;
+
+        point_3d p_curve = pe + d * t;
+        
+        curve.push_back(p_curve);
+    }
+
+    f = 0.1;
+    for ( int i = 1 ; i <= 10 ; ++i, f += 0.1 )
+    {
+        glColor3f(1, 0.5+0.5*f, 1);
+        draw_line(curve[i-1], curve[i]);
+    }
+
+    glPopMatrix();
     glFlush();
 }
 
@@ -270,15 +337,51 @@ void resize(int w, int h)
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
-    glLineWidth(1.5f);
+    glLineWidth(2);
 }
 
-void mouse(int /*button*/, int /*state*/, int /*x*/, int /*y*/)
+bool left_down = false;
+bool right_down = false;
+int down_x;
+int down_y;
+float prev_yaw;
+float prev_pitch;
+float prev_zoom;
+void mouse(int button, int state, int x, int y)
 {
+    bool down = state == 0;
+    if ( button == 0 )
+        left_down = down;
+    if ( button == 2 )
+        right_down = down;
+
+    down_x = x;
+    down_y = y;
+    prev_yaw = yaw;
+    prev_pitch = pitch;
+    prev_zoom = zoom;
+}
+void mouse_move(int x, int y)
+{
+    if ( left_down )
+    {
+        yaw = prev_yaw + (x - down_x) / 10.0f;
+        pitch = prev_pitch + (y - down_y) / 10.0f;
+    }
+    
+    if ( right_down )
+    {
+        zoom = prev_zoom + (y - down_y) / 100.0f;
+    }
 }
 
 void keyboard(unsigned char /*key*/, int /*x*/, int /*y*/)
 {
+}
+
+void idle_fun()
+{
+    glutPostRedisplay();
 }
 
 int main(int argc, char **argv)
@@ -290,8 +393,10 @@ int main(int argc, char **argv)
     glutCreateWindow("test-geoside");
 
     glutDisplayFunc(render_scene);
+    glutIdleFunc(idle_fun);
     glutReshapeFunc(resize);
     glutMouseFunc(mouse);
+    glutMotionFunc(mouse_move);
     glutKeyboardFunc(keyboard);
 
     glutMainLoop();
