@@ -47,6 +47,6 @@ Navigation:
 * '.' - increese flattening
 * 'm' - switch test method
 
-Spheroid with flattening = 0.5
+Spheroid with flattening = 0.25
 
 ![sph](sph.png)
