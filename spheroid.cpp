@@ -271,6 +271,7 @@ void normalize(point_3d & p)
 float yaw = 0;
 float pitch = 0;
 float zoom = 0;
+enum { method_interpolate, method_nearest } method = method_interpolate;
 
 void render_scene()
 {
@@ -313,19 +314,25 @@ void render_scene()
     for ( int i = 0 ; i <= count ; ++i, f += f_step )
     {
         point_3d ps = p1_3d + v_surface * f;
+        point_3d pe;
 
-//#define CALCULATE_NEAREST
-#define INTERPOLATE_BOTH
-#if defined(CALCULATE_NEAREST)
-
-        double nt = - bg::dot_product(p01_3d - ps, p02_3d - p01_3d) / bg::dot_product(v_equator, v_equator);
-        point_3d pe = p01_3d + v_equator * nt;
-
-#elif defined(INTERPOLATE_BOTH)
-
-        point_3d pe = p01_3d + v_equator * f;
-
-#endif
+        if ( method == method_interpolate )
+        {
+            pe = p01_3d + v_equator * f;
+        }
+        else // method == method_nearest
+        {
+            double l_sqr = bg::dot_product(v_equator, v_equator);
+            if ( !bg::math::equals(l_sqr, 0) )
+            {
+                double nt = -bg::dot_product(p01_3d - ps, p02_3d - p01_3d) / l_sqr;
+                pe = p01_3d + v_equator * nt;
+            }
+            else
+            {
+                pe = point_3d(0, 0, 0);
+            }
+        }
 
         glColor3f(1, 0.5+0.5*f, 0);
         draw_line(pe, ps);
@@ -530,19 +537,29 @@ void mouse_move(int x, int y)
 
 void keyboard(unsigned char key, int /*x*/, int /*y*/)
 {
+    static const double b_step = 0.05;
+
     if ( key == '.')
     {
-        b += 0.05;
-        if ( b > a )
-            b = a;
+        b += b_step;
+        if ( b > 2*a-b_step )
+            b = 2*a-b_step;
         sph = spheroid(a, b);
     }
     else if ( key == ',' )
     {
-        b -= 0.1;
-        if ( b < 0.05 )
-            b = 0.05;
+        b -= b_step;
+        if ( b < b_step )
+            b = b_step;
         sph = spheroid(a, b);
+    }
+
+    if ( key == 'm' )
+    {
+        if ( method == method_interpolate )
+            method = method_nearest;
+        else
+            method = method_interpolate;
     }
 }
 
