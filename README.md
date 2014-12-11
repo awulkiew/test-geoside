@@ -37,7 +37,8 @@ Curves:
 * test method - red
 * mapping into sphere - green
 * using geocentric coordinates - blue
-(green and blue may overlap)
+* using vincenty formula - white
+(green and blue overlaps)
 
 Navigation:
 * Left mouse button and move - yaw and pitch rotation
