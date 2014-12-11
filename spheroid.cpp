@@ -2,6 +2,7 @@
 
 #include <boost/geometry.hpp>
 #include <boost/geometry/geometries/register/point.hpp>
+#include <boost/geometry/extensions/arithmetic/cross_product.hpp>
 
 #include <iostream>
 #include <vector>
@@ -16,7 +17,7 @@ typedef bgm::point<double, 3, bg::cs::cartesian> point_3d;
 typedef bg::srs::spheroid<double> spheroid;
 
 double a = 1;
-double b = 0.5;
+double b = 0.75;
 spheroid sph(a, b);
 
 double pi = bg::math::pi<double>();
@@ -258,6 +259,15 @@ point_3d operator-(point_3d const& p1, point_3d const& p2) { point_3d res = p1; 
 point_3d operator*(point_3d const& p1, double v) { point_3d res = p1; bg::multiply_value(res, v); return res; }
 point_3d operator/(point_3d const& p1, double v) { point_3d res = p1; bg::divide_value(res, v); return res; }
 
+void normalize(point_3d & p)
+{
+    double l_sqr = bg::dot_product(p, p);
+    if ( !bg::math::equals(l_sqr, 0) )
+    {
+        bg::divide_value(p, sqrt(l_sqr));
+    }
+}
+
 float yaw = 0;
 float pitch = 0;
 float zoom = 0;
@@ -304,7 +314,8 @@ void render_scene()
     {
         point_3d ps = p1_3d + v_surface * f;
 
-#define CALCULATE_NEAREST
+//#define CALCULATE_NEAREST
+#define INTERPOLATE_BOTH
 #if defined(CALCULATE_NEAREST)
 
         double nt = - bg::dot_product(p01_3d - ps, p02_3d - p01_3d) / bg::dot_product(v_equator, v_equator);
@@ -424,6 +435,27 @@ void render_scene()
     }
 
 
+    bg::detail::vincenty_inverse<double> vi(bg::get_as_radian<0>(p1),
+                                            bg::get_as_radian<1>(p1),
+                                            bg::get_as_radian<0>(p2),
+                                            bg::get_as_radian<1>(p2),
+                                            sph);
+    double azi = vi.azimuth12();
+    point_3d v1_perp = p1_3d - p01_3d;
+    point_3d east = bg::cross_product(point_3d(0, 0, 1), v1_perp);
+    normalize(east);
+    point_3d north = bg::cross_product(v1_perp, east);
+    normalize(north);
+
+    glColor3f(1, 0, 0);
+    draw_line(p1_3d, p1_3d + east*0.2);
+    glColor3f(0, 1, 0);
+    draw_line(p1_3d, p1_3d + north*0.2);
+
+    point_3d v_azi = north * cos(azi) + east * sin(azi);
+    glColor3f(0, 0, 1);
+    draw_line(p1_3d, p1_3d + v_azi*0.4);
+
     glPopMatrix();
     glFlush();
 }
@@ -496,8 +528,22 @@ void mouse_move(int x, int y)
     }
 }
 
-void keyboard(unsigned char /*key*/, int /*x*/, int /*y*/)
+void keyboard(unsigned char key, int /*x*/, int /*y*/)
 {
+    if ( key == '.')
+    {
+        b += 0.05;
+        if ( b > a )
+            b = a;
+        sph = spheroid(a, b);
+    }
+    else if ( key == ',' )
+    {
+        b -= 0.1;
+        if ( b < 0.05 )
+            b = 0.05;
+        sph = spheroid(a, b);
+    }
 }
 
 void idle_fun()
