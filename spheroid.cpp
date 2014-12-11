@@ -460,7 +460,7 @@ void render_scene()
     draw_line(p1_3d, p1_3d + north*0.2);
 
     point_3d v_azi = north * cos(azi) + east * sin(azi);
-    glColor3f(0, 0, 1);
+    glColor3f(1, 1, 1);
     draw_line(p1_3d, p1_3d + v_azi*0.4);
 
     glPopMatrix();
