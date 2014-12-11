@@ -585,6 +585,8 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
         else
             method = method_interpolate;
     }
+
+    std::cout << "flattening: " << (a - b) / a << std::endl;
 }
 
 void idle_fun()
@@ -594,6 +596,8 @@ void idle_fun()
 
 int main(int argc, char **argv)
 {
+    std::cout << "flattening: " << (a - b) / a << std::endl;
+
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DEPTH | GLUT_SINGLE | GLUT_RGBA);
     glutInitWindowPosition(100,100);
