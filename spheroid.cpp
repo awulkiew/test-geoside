@@ -4,6 +4,9 @@
 #include <boost/geometry/geometries/register/point.hpp>
 #include <boost/geometry/extensions/arithmetic/cross_product.hpp>
 
+#include <boost/geometry/algorithms/detail/vincenty_direct.hpp>
+#include <boost/geometry/algorithms/detail/vincenty_inverse.hpp>
+
 #include <iostream>
 #include <vector>
 
@@ -307,6 +310,7 @@ void render_scene()
     std::vector<point_3d> curve;
     std::vector<point_3d> curve_mapped;
     std::vector<point_3d> curve_geocentric;
+    std::vector<point_3d> curve_vincenty;
 
     double f = 0;
     int count = 50;
@@ -428,20 +432,6 @@ void render_scene()
         }
     }
 
-    f = f_step;
-    for ( int i = 1 ; i <= count ; ++i, f += f_step )
-    {
-        glColor3f(0.5+0.5*f, 0, 0);
-        draw_line(curve[i-1], curve[i]);
-
-        glColor3f(0, 0.5+0.5*f, 0);
-        draw_line(curve_mapped[i-1], curve_mapped[i]);
-
-        glColor3f(0, 0, 0.5+0.5*f);
-        draw_line(curve_geocentric[i-1], curve_geocentric[i]);
-    }
-
-
     bg::detail::vincenty_inverse<double> vi(bg::get_as_radian<0>(p1),
                                             bg::get_as_radian<1>(p1),
                                             bg::get_as_radian<0>(p2),
@@ -449,19 +439,53 @@ void render_scene()
                                             sph);
     double azi = vi.azimuth12();
     point_3d v1_perp = p1_3d - p01_3d;
-    point_3d east = bg::cross_product(point_3d(0, 0, 1), v1_perp);
-    normalize(east);
-    point_3d north = bg::cross_product(v1_perp, east);
-    normalize(north);
+    point_3d loc_east = bg::cross_product(point_3d(0, 0, 1), v1_perp);
+    normalize(loc_east);
+    point_3d loc_north = bg::cross_product(v1_perp, loc_east);
+    normalize(loc_north);
+
+    double dist = vi.distance();
+    f = 0;
+    for ( int i = 0 ; i <= count ; ++i, f += f_step )
+    {
+        double d = f * dist;
+        bg::detail::vincenty_direct<double> vd(bg::get_as_radian<0>(p1),
+                                               bg::get_as_radian<1>(p1),
+                                               d,
+                                               azi,
+                                               sph);
+        double lon2_rad = vd.lon2();
+        double lat2_rad = vd.lat2();
+     
+        curve_vincenty.push_back(pcast<point_3d>(point_geo(lon2_rad * bg::math::r2d, lat2_rad * bg::math::r2d)));
+    }
 
     glColor3f(1, 0, 0);
-    draw_line(p1_3d, p1_3d + east*0.2);
+    draw_line(p1_3d, p1_3d + loc_east*0.2);
     glColor3f(0, 1, 0);
-    draw_line(p1_3d, p1_3d + north*0.2);
+    draw_line(p1_3d, p1_3d + loc_north*0.2);
 
-    point_3d v_azi = north * cos(azi) + east * sin(azi);
+    point_3d v_azi = loc_north * cos(azi) + loc_east * sin(azi);
     glColor3f(1, 1, 1);
     draw_line(p1_3d, p1_3d + v_azi*0.4);
+
+    f = f_step;
+    for ( int i = 1 ; i <= count ; ++i, f += f_step )
+    {
+        float c = 0.5+0.5*f;
+
+        glColor3f(c, 0, 0);
+        draw_line(curve[i-1], curve[i]);
+
+        glColor3f(0, c, 0);
+        draw_line(curve_mapped[i-1], curve_mapped[i]);
+
+        glColor3f(0, 0, c);
+        draw_line(curve_geocentric[i-1], curve_geocentric[i]);
+
+        glColor3f(c, c, c);
+        draw_line(curve_vincenty[i-1], curve_vincenty[i]);
+    }
 
     glPopMatrix();
     glFlush();
