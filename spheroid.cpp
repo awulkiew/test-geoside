@@ -37,6 +37,10 @@ struct color
     float r, g, b, a;
 };
 
+color operator+(color const& l, color const& r) { return color(l.r+r.r, l.g+r.g, l.b+r.b, l.a+r.a); }
+color operator-(color const& l, color const& r) { return color(l.r-r.r, l.g-r.g, l.b-r.b, l.a-r.a); }
+color operator*(color const& l, float f) { return color(l.r*f, l.g*f, l.b*f, l.a*f); }
+
 void convert(point_geo const& p, point_3d & res)
 {
     double lon = bg::get_as_radian<0>(p);
@@ -74,6 +78,46 @@ void convert(point_sph const& p, point_geo & res)
 {
     bg::set<0>(res, bg::get<0>(p));
     bg::set<1>(res, bg::get<1>(p));
+}
+
+enum mapping_type { mapping_geodetic, mapping_geocentric, mapping_reduced };
+
+void convert(point_geo const& p, point_sph & res, mapping_type mapping)
+{
+    bg::set<0>(res, bg::get<0>(p));
+
+    if ( mapping == mapping_geodetic )
+    {
+        bg::set<1>(res, bg::get<1>(p));
+    }
+    else
+    {
+        double b_a = bg::get_radius<2>(sph) / bg::get_radius<0>(sph);
+        
+        if ( mapping == mapping_geocentric )
+            bg::set_from_radian<1>(res, atan(b_a * b_a * tan(bg::get_as_radian<1>(p))));
+        else
+            bg::set_from_radian<1>(res, atan(b_a * tan(bg::get_as_radian<1>(p))));
+    }
+}
+
+void convert(point_sph const& p, point_geo & res, mapping_type mapping)
+{
+    bg::set<0>(res, bg::get<0>(p));
+    
+    if ( mapping == mapping_geodetic )
+    {
+        bg::set<1>(res, bg::get<1>(p));
+    }
+    else
+    {
+        double a_b = bg::get_radius<0>(sph) / bg::get_radius<2>(sph);
+
+        if ( mapping == mapping_geocentric )
+            bg::set_from_radian<1>(res, atan(a_b * a_b * tan(bg::get_as_radian<1>(p))));
+        else
+            bg::set_from_radian<1>(res, atan(a_b * tan(bg::get_as_radian<1>(p))));
+    }
 }
 
 void convert(point_3d const& p, point_3d & res)
@@ -142,7 +186,7 @@ void draw_meridian(double lon, double step = pi/32)
         double y = a * cos_lat * sin(lon);
         double z = b * sin(lat);
 
-        double eq = (x*x+y*y)/(a*a) + z*z/(b*b);
+        //double eq = (x*x+y*y)/(a*a) + z*z/(b*b);
         //assert(bg::math::equals(eq, 1.0));
 
         glVertex3f(x, y, z);
@@ -160,7 +204,7 @@ void draw_parallel(double lat, double step = pi/32)
         double y = a * cos_lat * sin(lon);
         double z = b * sin(lat);
 
-        double eq = (x*x+y*y)/(a*a) + z*z/(b*b);
+        //double eq = (x*x+y*y)/(a*a) + z*z/(b*b);
         //assert(bg::math::equals(eq, 1.0));
 
         glVertex3f(x, y, z);
@@ -271,10 +315,305 @@ void normalize(point_3d & p)
     }
 }
 
+struct scene_data
+{
+    enum { method_interpolate, method_nearest } method;
+    bool enable_experimental;
+    bool enable_mapping_geodetic;
+    bool enable_mapping_geocentric;
+    bool enable_mapping_reduced;
+    bool enable_great_ellipse;
+    bool enable_vincenty;
+
+    std::vector<point_3d> curve_experimental;
+    std::vector<std::pair<point_3d, point_3d> > lines_experimental;
+    std::vector<point_3d> curve_mapped_geodetic;
+    std::vector<point_3d> curve_mapped_geocentric;
+    std::vector<point_3d> curve_mapped_reduced;
+    std::vector<point_3d> curve_great_ellipse;
+    std::vector<point_3d> curve_vincenty;
+
+    point_3d p1_s; // cartesian point on surface
+    point_3d p2_s; // cartesian point on surface
+    point_3d p1_xy; // corresponding cartesian point on XY
+    point_3d p2_xy; // corresponding cartesian point on XY
+
+    point_3d v_s; // vector between the surface points
+    point_3d v_xy; // vector between the XY points
+
+    scene_data()
+    {
+        method = method_interpolate;
+        enable_experimental = true;
+        enable_mapping_geodetic = true;
+        enable_mapping_geocentric = false;
+        enable_mapping_reduced = false;
+        enable_great_ellipse = true;
+        enable_vincenty = true;
+    }
+
+    void clear()
+    {
+        curve_experimental.clear();
+        lines_experimental.clear();
+        curve_mapped_geodetic.clear();
+        curve_mapped_geocentric.clear();
+        curve_mapped_reduced.clear();
+        curve_great_ellipse.clear();
+        curve_vincenty.clear();
+    }
+
+    void recalculate(point_geo const& p1, point_geo const& p2)
+    {
+        clear();
+
+        // cartesian points
+        p1_s = pcast<point_3d>(p1);
+        p2_s = pcast<point_3d>(p2);
+        p1_xy = projected_to_xy_geod(p1);
+        p2_xy = projected_to_xy_geod(p2);
+        // cartesian vectors
+        v_s = p2_s - p1_s;
+        v_xy = p2_xy - p1_xy;
+
+        double f = 0;
+        int count = 50;
+        double f_step = 1.0 / count;
+        for ( int i = 0 ; i <= count ; ++i, f += f_step )
+        {
+            point_3d ps = p1_s + v_s * f;
+
+            // experimental method
+            if ( enable_experimental )
+            {
+                point_3d pxy;
+
+                if ( method == method_interpolate )
+                {
+                    pxy = p1_xy + v_xy * f;
+                }
+                else // method == method_nearest
+                {
+                    double l_sqr = bg::dot_product(v_xy, v_xy);
+                    if ( !bg::math::equals(l_sqr, 0) )
+                    {
+                        double nt = -bg::dot_product(p1_xy - ps, p2_xy - p1_xy) / l_sqr;
+                        pxy = p1_xy + v_xy * nt;
+                    }
+                    else
+                    {
+                        pxy = point_3d(0, 0, 0);
+                    }
+                }
+
+                // segments between the lines
+                lines_experimental.push_back(std::make_pair(pxy, ps));
+
+                // vectors corresponding to segments
+                point_3d d = ps - pxy;
+
+                // calculate the point of intersection of a ray and spheroid's surface
+                //(x*x+y*y)/(a*a) + z*z/(b*b) = 1
+                // x = o.x + d.x * t
+                // y = o.y + d.y * t
+                // z = o.z + d.z * t        
+                double ox = bg::get<0>(pxy);
+                double oy = bg::get<1>(pxy);
+                double oz = bg::get<2>(pxy);
+                double dx = bg::get<0>(d);
+                double dy = bg::get<1>(d);
+                double dz = bg::get<2>(d);
+
+                double a_sqr = a*a;
+                double b_sqr = b*b;
+                double param_a = (dx*dx+dy*dy)/a_sqr+dz*dz/b_sqr;
+                double param_b = 2*((ox*dx+oy*dy)/a_sqr+oz*dz/b_sqr);
+                double param_c = (ox*ox+oy*oy)/a_sqr+oz*oz/b_sqr-1;
+
+                double delta = param_b*param_b-4*param_a*param_c;
+                double t = delta >= 0 ?
+                           (-param_b+sqrt(delta)) / (2*param_a) :
+                           0.0;
+
+                point_3d p_curve = pxy + d * t;
+
+                curve_experimental.push_back(p_curve);
+            }
+
+            // great ellipse
+            if ( enable_great_ellipse )
+            {
+                double dx = bg::get<0>(ps);
+                double dy = bg::get<1>(ps);
+                double dz = bg::get<2>(ps);
+
+                double a_sqr = a*a;
+                double b_sqr = b*b;
+                double param_a = (dx*dx+dy*dy)/a_sqr+dz*dz/b_sqr;
+                double param_c = -1;
+
+                double delta = -4*param_a*param_c;
+                double t = delta >= 0 ?
+                           sqrt(delta) / (2*param_a) :
+                           0.0;
+
+                point_3d p_curve = ps * t;
+
+                curve_great_ellipse.push_back(p_curve);
+            }
+
+            // mapped to sphere
+            if ( enable_mapping_geodetic )
+            {
+                recalculate_mapped(p1, p2, f, curve_mapped_geodetic, mapping_geodetic);
+            }
+            
+            if ( enable_mapping_geocentric )
+            {
+                recalculate_mapped(p1, p2, f, curve_mapped_geocentric, mapping_geocentric);
+            }
+
+            if ( enable_mapping_reduced )
+            {
+                recalculate_mapped(p1, p2, f, curve_mapped_reduced, mapping_reduced);
+            }
+        }
+
+        // vincenty
+        {
+            // calculate the azimuth and distance from p1 to p2
+            bg::detail::vincenty_inverse<double> vi(bg::get_as_radian<0>(p1),
+                                                    bg::get_as_radian<1>(p1),
+                                                    bg::get_as_radian<0>(p2),
+                                                    bg::get_as_radian<1>(p2),
+                                                    sph);
+            double azi = vi.azimuth12();
+            double dist = vi.distance();
+
+            double f = 0;
+            for ( int i = 0 ; i <= count ; ++i, f += f_step )
+            {
+                // current distance (fraction of the whole distance)
+                double d = f * dist;
+                // calculate the position of p2 for given d and azimuth
+                bg::detail::vincenty_direct<double> vd(bg::get_as_radian<0>(p1),
+                                                       bg::get_as_radian<1>(p1),
+                                                       d,
+                                                       azi,
+                                                       sph);
+                double lon2_rad = vd.lon2();
+                double lat2_rad = vd.lat2();
+
+                point_geo p;
+                bg::set_from_radian<0>(p, lon2_rad);
+                bg::set_from_radian<1>(p, lat2_rad);
+
+                curve_vincenty.push_back(pcast<point_3d>(p));
+            }
+
+            // calculate the azimuth vector
+            /*point_3d v1_perp = p1_s - p1_xy;
+            point_3d loc_east = bg::cross_product(point_3d(0, 0, 1), v1_perp);
+            normalize(loc_east);
+            point_3d loc_north = bg::cross_product(v1_perp, loc_east);
+            normalize(loc_north);
+            point_3d v_azi = loc_north * cos(azi) + loc_east * sin(azi);*/
+        }
+    }
+
+    void recalculate_mapped(point_geo const& p1,
+                            point_geo const& p2,
+                            double const& f,
+                            std::vector<point_3d> & curve,
+                            mapping_type mapping)
+    {
+        // geographic mapped to spherical
+        point_sph p1_m, p2_m;
+        ::convert(p1, p1_m, mapping);
+        ::convert(p2, p2_m, mapping);
+        
+        // spherical mapped to cartesian 3d
+        point_3d p1_mc = pcast<point_3d>(p1_m);
+        point_3d p2_mc = pcast<point_3d>(p2_m);
+        point_3d v_mc = p2_mc - p1_mc;
+
+        // vector attached at 0.0
+        point_3d d_mc = p1_mc + v_mc * f;
+
+        //x*x+y*y+z*z = a*a
+        double dx = bg::get<0>(d_mc);
+        double dy = bg::get<1>(d_mc);
+        double dz = bg::get<2>(d_mc);
+
+        double param_a = dx*dx+dy*dy+dz*dz;
+        double param_c = -a*a;
+
+        double delta = -4*param_a*param_c;
+        double t = delta >= 0 ?
+                   sqrt(delta) / (2*param_a) :
+                   0.0;
+
+        // 3d cartesian point on a surface of a sphere
+        point_3d p_curve_mc = d_mc * t;
+        // spherical point
+        point_sph p_curve_m = pcast<point_sph>(p_curve_mc);
+        // geographical point
+        point_geo p_curve;
+        ::convert(p_curve_m, p_curve, mapping);
+        // 3d cartesian point on a surface of a spheroid
+        point_3d p_curve_3d = pcast<point_3d>(p_curve);
+
+        curve.push_back(p_curve_3d);
+    }
+
+    void switch_method()
+    {
+        if ( method == method_interpolate )
+            method = method_nearest;
+        else
+            method = method_interpolate;
+    }
+
+    void print_settings() const
+    {
+        std::cout << "method:             " << method_str() << '\n'
+                  << "experimental:       " << flag_str(enable_experimental) << '\n'
+                  << "mapping_geodetic:   " << flag_str(enable_mapping_geodetic) << '\n'
+                  << "mapping_geocentric: " << flag_str(enable_mapping_geocentric) << '\n'
+                  << "mapping_reduced:    " << flag_str(enable_mapping_reduced) << '\n'
+                  << "great_ellipse:      " << flag_str(enable_great_ellipse) << '\n'
+                  << "vincenty:           " << flag_str(enable_vincenty) << '\n';
+        std::cout.flush();
+    }
+
+    std::string flag_str(bool f) const { return f ? "on" : "off"; }
+    std::string method_str() const { return method == method_interpolate ? "interpolate" : "nearest"; }
+
+} data;
+
+void draw_curve(std::vector<point_3d> const& curve, color const& color_first, color const& color_last)
+{
+    size_t count = curve.size();
+
+    if ( count == 0 )
+        return;
+
+    double f = 0;
+    double f_step = 1.0 / count;
+    for ( size_t i = 1 ; i < count ; ++i, f += f_step )
+    {
+        color col = color_first + (color_last - color_first) * f;
+        glColor3f(col.r, col.g, col.b);
+        draw_line(curve[i-1], curve[i]);
+    }
+}
+
+point_geo p1(-60, -60);
+point_geo p2(60, 60);
+
 float yaw = 0;
 float pitch = 0;
 float zoom = 0;
-enum { method_interpolate, method_nearest } method = method_interpolate;
 
 void render_scene()
 {
@@ -288,204 +627,49 @@ void render_scene()
 
     draw_model();
 
-
-    point_geo p1(-60, -60);
-    point_geo p2(60, 60);
-
     draw_point_adv(p1, color(1, 0.5, 0));
     draw_point_adv(p2, color(1, 1, 0));
 
-    point_3d p1_3d = pcast<point_3d>(p1);
-    point_3d p2_3d = pcast<point_3d>(p2);
-    point_3d p01_3d = projected_to_xy_geod(p1);
-    point_3d p02_3d = projected_to_xy_geod(p2);
-
-    point_3d v_surface = p2_3d - p1_3d;
-    point_3d v_equator = p02_3d - p01_3d;
-
     glColor3f(1, 1, 1);
-    draw_line(p1_3d, p2_3d);
-    draw_line(p01_3d, p02_3d);
+    draw_line(data.p1_s, data.p2_s);
+    draw_line(data.p1_xy, data.p2_xy);
     
-    std::vector<point_3d> curve;
-    std::vector<point_3d> curve_mapped;
-    std::vector<point_3d> curve_geocentric;
-    std::vector<point_3d> curve_vincenty;
-
-    double f = 0;
-    int count = 50;
-    double f_step = 1.0 / count;
-    for ( int i = 0 ; i <= count ; ++i, f += f_step )
+    // draw experimental lines
+    if ( data.enable_experimental )
     {
-        point_3d ps = p1_3d + v_surface * f;
-        point_3d pe;
-
-        if ( method == method_interpolate )
+        size_t count = data.lines_experimental.size();
+        double f = 0;
+        double f_step = 1.0 / count;
+        for ( size_t i = 0 ; i < count ; ++i, f += f_step )
         {
-            pe = p01_3d + v_equator * f;
-        }
-        else // method == method_nearest
-        {
-            double l_sqr = bg::dot_product(v_equator, v_equator);
-            if ( !bg::math::equals(l_sqr, 0) )
-            {
-                double nt = -bg::dot_product(p01_3d - ps, p02_3d - p01_3d) / l_sqr;
-                pe = p01_3d + v_equator * nt;
-            }
-            else
-            {
-                pe = point_3d(0, 0, 0);
-            }
+            glColor3f(1, 0.5+0.5*f, 0); // orange -> yellow
+            draw_line(data.lines_experimental[i].first, data.lines_experimental[i].second);
         }
 
-        glColor3f(1, 0.5+0.5*f, 0);
-        draw_line(pe, ps);
-
-        point_3d d = ps - pe;
-        
-        //(x*x+y*y)/(a*a) + z*z/(b*b) = 1
-        // x = o.x + d.x * t
-        // y = o.y + d.y * t
-        // z = o.z + d.z * t        
-        double ox = bg::get<0>(pe);
-        double oy = bg::get<1>(pe);
-        double oz = bg::get<2>(pe);
-        double dx = bg::get<0>(d);
-        double dy = bg::get<1>(d);
-        double dz = bg::get<2>(d);
-
-        double a_sqr = a*a;
-        double b_sqr = b*b;
-        double param_a = (dx*dx+dy*dy)/a_sqr+dz*dz/b_sqr;
-        double param_b = 2*((ox*dx+oy*dy)/a_sqr+oz*dz/b_sqr);
-        double param_c = (ox*ox+oy*oy)/a_sqr+oz*oz/b_sqr-1;
-
-        double delta = param_b*param_b-4*param_a*param_c;
-        double t = delta >= 0 ?
-                   (-param_b+sqrt(delta)) / (2*param_a) :
-                   0.0;
-
-        point_3d p_curve = pe + d * t;
-        
-        curve.push_back(p_curve);
-
-        // geocentric
-        {
-            double dx = bg::get<0>(ps);
-            double dy = bg::get<1>(ps);
-            double dz = bg::get<2>(ps);
-
-            double a_sqr = a*a;
-            double b_sqr = b*b;
-            double param_a = (dx*dx+dy*dy)/a_sqr+dz*dz/b_sqr;
-            double param_c = -1;
-
-            double delta = -4*param_a*param_c;
-            double t = delta >= 0 ?
-                       sqrt(delta) / (2*param_a) :
-                       0.0;
-
-            point_3d p_curve_geocentric = ps * t;
-
-            curve_geocentric.push_back(p_curve_geocentric);
-        }
-
-        // mapped to spherical
-        {
-            point_sph p1_m = pcast<point_sph>(p1);
-            point_sph p2_m = pcast<point_sph>(p2);
-            point_3d p1_mc = pcast<point_3d>(p1_m);
-            point_3d p2_mc = pcast<point_3d>(p2_m);
-            point_3d v_mc = p2_mc - p1_mc;
-
-            point_3d curr_v_mc = p1_mc + v_mc * f;
-
-            //glColor3f(0, 1, 0);
-            //draw_line(point_3d(0, 0, 0), curr_v_mc);
-
-            //x*x+y*y+z*z = a*a
-            double dx = bg::get<0>(curr_v_mc);
-            double dy = bg::get<1>(curr_v_mc);
-            double dz = bg::get<2>(curr_v_mc);
-
-            double param_a = dx*dx+dy*dy+dz*dz;
-            double param_c = -a*a;
-
-            double delta = -4*param_a*param_c;
-            double t = delta >= 0 ?
-                       sqrt(delta) / (2*param_a) :
-                       0.0;
-
-            point_3d p_curve_mc = curr_v_mc * t;
-
-            //glColor3f(0, 0, 1);
-            //draw_line(point_3d(0, 0, 0), p_curve_mc);
-
-            point_sph p_curve_m = pcast<point_sph>(p_curve_mc);
-            point_geo p_curve = pcast<point_geo>(p_curve_m);
-            point_3d p_curve_3d = pcast<point_3d>(p_curve);
-
-            //glColor3f(1, 0, 0);
-            //draw_line(point_3d(0, 0, 0), p_curve_3d);
-
-            curve_mapped.push_back(p_curve_3d);
-        }
+        // orange -> yellow
+        draw_curve(data.curve_experimental, color(1, 0.5, 0), color(1, 1, 0));
     }
+    
+    if ( data.enable_mapping_geodetic ) // red
+        draw_curve(data.curve_mapped_geodetic, color(0.5, 0, 0), color(1, 0, 0));
+    if ( data.enable_mapping_geocentric ) // green
+        draw_curve(data.curve_mapped_geocentric, color(0, 0.5, 0), color(0, 1, 0));
+    if ( data.enable_mapping_reduced ) // blue
+        draw_curve(data.curve_mapped_reduced, color(0, 0.25, 0.5), color(0, 0.5, 1));
 
-    bg::detail::vincenty_inverse<double> vi(bg::get_as_radian<0>(p1),
-                                            bg::get_as_radian<1>(p1),
-                                            bg::get_as_radian<0>(p2),
-                                            bg::get_as_radian<1>(p2),
-                                            sph);
-    double azi = vi.azimuth12();
-    point_3d v1_perp = p1_3d - p01_3d;
-    point_3d loc_east = bg::cross_product(point_3d(0, 0, 1), v1_perp);
-    normalize(loc_east);
-    point_3d loc_north = bg::cross_product(v1_perp, loc_east);
-    normalize(loc_north);
+    if ( data.enable_great_ellipse ) // pink
+        draw_curve(data.curve_great_ellipse, color(0.5, 0, 0.5), color(1, 0, 1));
 
-    double dist = vi.distance();
-    f = 0;
-    for ( int i = 0 ; i <= count ; ++i, f += f_step )
-    {
-        double d = f * dist;
-        bg::detail::vincenty_direct<double> vd(bg::get_as_radian<0>(p1),
-                                               bg::get_as_radian<1>(p1),
-                                               d,
-                                               azi,
-                                               sph);
-        double lon2_rad = vd.lon2();
-        double lat2_rad = vd.lat2();
-     
-        curve_vincenty.push_back(pcast<point_3d>(point_geo(lon2_rad * bg::math::r2d, lat2_rad * bg::math::r2d)));
-    }
+    if ( data.enable_vincenty ) // gray->white
+        draw_curve(data.curve_vincenty, color(0.75, 0.75, 0.75), color(1, 1, 1));
 
-    glColor3f(1, 0, 0);
-    draw_line(p1_3d, p1_3d + loc_east*0.2);
+    // vincenty azimuth 
+    /*glColor3f(1, 0, 0);
+    draw_line(p1_s, p1_s + loc_east*0.2);
     glColor3f(0, 1, 0);
-    draw_line(p1_3d, p1_3d + loc_north*0.2);
-
-    point_3d v_azi = loc_north * cos(azi) + loc_east * sin(azi);
+    draw_line(p1_s, p1_s + loc_north*0.2);
     glColor3f(1, 1, 1);
-    draw_line(p1_3d, p1_3d + v_azi*0.4);
-
-    f = f_step;
-    for ( int i = 1 ; i <= count ; ++i, f += f_step )
-    {
-        float c = 0.5+0.5*f;
-
-        glColor3f(c, 0, 0);
-        draw_line(curve[i-1], curve[i]);
-
-        glColor3f(0, c, 0);
-        draw_line(curve_mapped[i-1], curve_mapped[i]);
-
-        glColor3f(0, 0, c);
-        draw_line(curve_geocentric[i-1], curve_geocentric[i]);
-
-        glColor3f(c, c, c);
-        draw_line(curve_vincenty[i-1], curve_vincenty[i]);
-    }
+    draw_line(p1_s, p1_s + v_azi*0.3);*/
 
     glPopMatrix();
     glFlush();
@@ -559,11 +743,31 @@ void mouse_move(int x, int y)
     }
 }
 
+void print_help()
+{
+    std::cout << "Navigation: mouse" << '\n'
+              << "h - display help" << '\n'
+              << ", - decrease b, increase flattening" << '\n'
+              << ". - increase b, decrease flattening" << '\n'
+              << "m - experimental method switch" << '\n'
+              << "1 - experimental curve on/off" << '\n'
+              << "2 - geodetic curve on/off" << '\n'
+              << "3 - geocentric curve on/off" << '\n'
+              << "4 - reduced curve on/off" << '\n'
+              << "5 - great ellipse curve on/off" << '\n'
+              << "6 - vincenty curve on/off" << '\n';
+    std::cout.flush();
+}
+
 void keyboard(unsigned char key, int /*x*/, int /*y*/)
 {
     static const double b_step = 0.05;
 
-    if ( key == '.')
+    if ( key == 'h' )
+    {
+        print_help();
+    }
+    else if ( key == '.')
     {
         b += b_step;
         if ( b > 2*a-b_step )
@@ -577,16 +781,39 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
             b = b_step;
         sph = spheroid(a, b);
     }
-
-    if ( key == 'm' )
+    else if ( key == 'm' )
     {
-        if ( method == method_interpolate )
-            method = method_nearest;
-        else
-            method = method_interpolate;
+        data.switch_method();
+    }
+    else if ( key == '1' )
+    {
+        data.enable_experimental = !data.enable_experimental;
+    }
+    else if ( key == '2' )
+    {
+        data.enable_mapping_geodetic = !data.enable_mapping_geodetic;
+    }
+    else if ( key == '3' )
+    {
+        data.enable_mapping_geocentric = !data.enable_mapping_geocentric;
+    }
+    else if ( key == '4' )
+    {
+        data.enable_mapping_reduced = !data.enable_mapping_reduced;
+    }
+    else if ( key == '5' )
+    {
+        data.enable_great_ellipse = !data.enable_great_ellipse;
+    }
+    else if ( key == '6' )
+    {
+        data.enable_vincenty = !data.enable_vincenty;
     }
 
     std::cout << "flattening: " << (a - b) / a << std::endl;
+    data.print_settings();
+
+    data.recalculate(p1, p2);
 }
 
 void idle_fun()
@@ -596,8 +823,12 @@ void idle_fun()
 
 int main(int argc, char **argv)
 {
+    print_help();
     std::cout << "flattening: " << (a - b) / a << std::endl;
+    data.print_settings();
 
+    data.recalculate(p1, p2);
+    
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DEPTH | GLUT_SINGLE | GLUT_RGBA);
     glutInitWindowPosition(100,100);
