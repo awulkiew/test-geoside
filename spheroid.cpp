@@ -778,7 +778,7 @@ void print_help()
 void print_geometry()
 {
     std::cout << "p1:         (" << bg::get<0>(p1) << ", " << bg::get<1>(p1) << ")\n";
-    std::cout << "p2:         (" << bg::get<0>(p2) << ", " << bg::get<0>(p2) << ")\n";
+    std::cout << "p2:         (" << bg::get<0>(p2) << ", " << bg::get<1>(p2) << ")\n";
     std::cout << "flattening: " << (a - b) / a << std::endl;
 }
 
