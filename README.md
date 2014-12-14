@@ -42,19 +42,20 @@ Curves:
 * vincenty - gray->white
 (NOTE: great ellipse and mappings overlaps)
 
-    Mouse - navigation
-    WSAD  - move p1
-    IKJL  - move p2
-    h     - display help
-    ,     - decrease b, increase flattening
-    .     - increase b, decrease flattening
-    m     - experimental method switch
-    1     - experimental curve on/off
-    2     - geodetic curve on/off
-    3     - geocentric curve on/off
-    4     - reduced curve on/off
-    5     - great ellipse curve on/off
-    6     - vincenty curve on/off
+UI
+* Mouse - navigation
+* WSAD  - move p1
+* IKJL  - move p2
+* h     - display help
+* ,     - decrease b, increase flattening
+* .     - increase b, decrease flattening
+* m     - experimental method switch
+* 1     - experimental curve on/off
+* 2     - geodetic curve on/off
+* 3     - geocentric curve on/off
+* 4     - reduced curve on/off
+* 5     - great ellipse curve on/off
+* 6     - vincenty curve on/off
 
 Spheroid with flattening = 0.25
 
