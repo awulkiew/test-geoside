@@ -23,6 +23,7 @@ Curves:
 * reduced mapping - blue
 * great ellipse - magenta
 * vincenty - gray->white
+
 (NOTE: great ellipse and mappings overlaps)
 
 UI
