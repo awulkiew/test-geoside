@@ -577,7 +577,8 @@ struct scene_data
 
     void print_settings() const
     {
-        std::cout << "method:             " << method_str() << '\n'
+        std::cout << "SETTINGS\n"
+                  << "method:             " << method_str() << '\n'
                   << "experimental:       " << flag_str(enable_experimental) << '\n'
                   << "mapping_geodetic:   " << flag_str(enable_mapping_geodetic) << '\n'
                   << "mapping_geocentric: " << flag_str(enable_mapping_geocentric) << '\n'
@@ -597,6 +598,34 @@ struct scene_data
         return method == method_interpolate ? "interpolate" :
                method == method_nearest ? "nearest" :
                "mean point";
+    }
+
+    void print_curve_lengths() const
+    {
+        std::cout << "LENGTHS\n"
+                  << "experimental:       " << curve_length(curve_experimental) << '\n'
+                  << "mapping_geodetic:   " << curve_length(curve_mapped_geodetic) << '\n'
+                  << "mapping_geocentric: " << curve_length(curve_mapped_geocentric) << '\n'
+                  << "mapping_reduced:    " << curve_length(curve_mapped_reduced) << '\n'
+                  << "great_ellipse:      " << curve_length(curve_great_ellipse) << '\n'
+                  << "vincenty:           " << curve_length(curve_vincenty) << '\n';
+        std::cout.flush();
+    }
+
+    static double curve_length(std::vector<point_3d> const& curve)
+    {
+        double result = 0.0;
+
+        size_t count = curve.size();
+        if ( count == 0 )
+            return result;
+
+        for ( size_t i = 1 ; i < count ; ++i )
+        {
+            result += sqrt(bg::dot_product(curve[i-1], curve[i]));
+        }
+
+        return result;
     }
 
 } data;
@@ -759,7 +788,8 @@ void mouse_move(int x, int y)
 
 void print_help()
 {
-    std::cout << "Mouse - navigation" << '\n'
+    std::cout << "UI\n"
+              << "Mouse - navigation" << '\n'
               << "WSAD  - move p1" << '\n'
               << "IKJL  - move p2" << '\n'
               << "h     - display help" << '\n'
@@ -777,6 +807,7 @@ void print_help()
 
 void print_geometry()
 {
+    std::cout << "GEOMETRY\n";
     std::cout << "p1:         (" << bg::get<0>(p1) << ", " << bg::get<1>(p1) << ")\n";
     std::cout << "p2:         (" << bg::get<0>(p2) << ", " << bg::get<1>(p2) << ")\n";
     std::cout << "flattening: " << (a - b) / a << std::endl;
@@ -878,6 +909,7 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
         data.print_settings();
 
         data.recalculate(p1, p2);
+        data.print_curve_lengths();
     }
 }
 
@@ -893,6 +925,7 @@ int main(int argc, char **argv)
     data.print_settings();
 
     data.recalculate(p1, p2);
+    data.print_curve_lengths();
     
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DEPTH | GLUT_SINGLE | GLUT_RGBA);
