@@ -346,8 +346,8 @@ struct scene_data
         method = method_interpolate;
         enable_experimental = true;
         enable_mapping_geodetic = true;
-        enable_mapping_geocentric = false;
-        enable_mapping_reduced = false;
+        enable_mapping_geocentric = true;
+        enable_mapping_reduced = true;
         enable_great_ellipse = true;
         enable_vincenty = true;
     }
