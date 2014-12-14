@@ -773,9 +773,34 @@ void print_help()
     std::cout.flush();
 }
 
+void print_geometry()
+{
+    std::cout << "p1:         (" << bg::get<0>(p1) << ", " << bg::get<1>(p1) << ")\n";
+    std::cout << "p2:         (" << bg::get<0>(p2) << ", " << bg::get<0>(p2) << ")\n";
+    std::cout << "flattening: " << (a - b) / a << std::endl;
+}
+
+void move_lat(point_geo & p, double diff)
+{
+    double l = bg::get<1>(p) + diff;
+    if ( l > 89 ) l = 89;
+    if ( l < -89 ) l = -89;
+    bg::set<1>(p, l);
+}
+
+void move_lon(point_geo & p, double diff)
+{
+    double l = bg::get<0>(p) + diff;
+    if ( l > 180 ) l -= 360;
+    if ( l < -180 ) l += 360;
+    bg::set<0>(p, l);
+}
+
 void keyboard(unsigned char key, int /*x*/, int /*y*/)
 {
     static const double b_step = 0.05;
+
+    bool refresh = true;
 
     if ( key == 'h' )
     {
@@ -823,11 +848,35 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
     {
         data.enable_vincenty = !data.enable_vincenty;
     }
+    // moving of the p1
+    else if ( key == 'w' )
+        move_lat(p1, 1);
+    else if ( key == 's' )
+        move_lat(p1, -1);
+    else if ( key == 'a' )
+        move_lon(p1, -1);
+    else if ( key == 'd' )
+        move_lon(p1, 1);
+    // moving of the p2
+    else if ( key == 'i' )
+        move_lat(p2, 1);
+    else if ( key == 'k' )
+        move_lat(p2, -1);
+    else if ( key == 'j' )
+        move_lon(p2, -1);
+    else if ( key == 'l' )
+        move_lon(p2, 1);
+    // other key
+    else
+        refresh = false;
 
-    std::cout << "flattening: " << (a - b) / a << std::endl;
-    data.print_settings();
+    if ( refresh )
+    {
+        print_geometry();
+        data.print_settings();
 
-    data.recalculate(p1, p2);
+        data.recalculate(p1, p2);
+    }
 }
 
 void idle_fun()
@@ -838,7 +887,7 @@ void idle_fun()
 int main(int argc, char **argv)
 {
     print_help();
-    std::cout << "flattening: " << (a - b) / a << std::endl;
+    print_geometry();
     data.print_settings();
 
     data.recalculate(p1, p2);
