@@ -34,18 +34,26 @@ Points:
 * p2 - yellow
 
 Curves:
-* test method - red
-* mapping into sphere - green
-* using geocentric coordinates - blue
-* using vincenty formula - white
-(green and blue overlaps)
+* experimental - orange -> yellow
+* geodetic mapping - red
+* geocentric mapping - green
+* reduced mapping - blue
+* great ellipse - magenta
+* vincenty - gray->white
+(NOTE: great ellipse and mappings overlaps)
 
-Navigation:
-* Left mouse button and move - yaw and pitch rotation
-* Right mouse button and move - zoom
-* ',' - decreese flattening
-* '.' - increese flattening
-* 'm' - switch test method
+UI
+* Navigation: mouse
+* h - display help
+* , - decrease b, increase flattening
+* . - increase b, decrease flattening
+* m - experimental method switch
+* 1 - experimental curve on/off
+* 2 - geodetic curve on/off
+* 3 - geocentric curve on/off
+* 4 - reduced curve on/off
+* 5 - great ellipse curve on/off
+* 6 - vincenty curve on/off
 
 Spheroid with flattening = 0.25
 
