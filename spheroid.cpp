@@ -759,17 +759,19 @@ void mouse_move(int x, int y)
 
 void print_help()
 {
-    std::cout << "Navigation: mouse" << '\n'
-              << "h - display help" << '\n'
-              << ", - decrease b, increase flattening" << '\n'
-              << ". - increase b, decrease flattening" << '\n'
-              << "m - experimental method switch" << '\n'
-              << "1 - experimental curve on/off" << '\n'
-              << "2 - geodetic curve on/off" << '\n'
-              << "3 - geocentric curve on/off" << '\n'
-              << "4 - reduced curve on/off" << '\n'
-              << "5 - great ellipse curve on/off" << '\n'
-              << "6 - vincenty curve on/off" << '\n';
+    std::cout << "Mouse - navigation" << '\n'
+              << "WSAD  - move p1" << '\n'
+              << "IKJL  - move p2" << '\n'
+              << "h     - display help" << '\n'
+              << ",     - decrease b, increase flattening" << '\n'
+              << ".     - increase b, decrease flattening" << '\n'
+              << "m     - experimental method switch" << '\n'
+              << "1     - experimental curve on/off" << '\n'
+              << "2     - geodetic curve on/off" << '\n'
+              << "3     - geocentric curve on/off" << '\n'
+              << "4     - reduced curve on/off" << '\n'
+              << "5     - great ellipse curve on/off" << '\n'
+              << "6     - vincenty curve on/off" << '\n';
     std::cout.flush();
 }
 
