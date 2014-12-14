@@ -317,7 +317,7 @@ void normalize(point_3d & p)
 
 struct scene_data
 {
-    enum { method_interpolate, method_nearest } method;
+    enum method_type { method_interpolate = 0, method_nearest, method_mean_point } method;
     bool enable_experimental;
     bool enable_mapping_geodetic;
     bool enable_mapping_geocentric;
@@ -392,7 +392,7 @@ struct scene_data
                 {
                     pxy = p1_xy + v_xy * f;
                 }
-                else // method == method_nearest
+                else if ( method == method_nearest )
                 {
                     double l_sqr = bg::dot_product(v_xy, v_xy);
                     if ( !bg::math::equals(l_sqr, 0) )
@@ -404,6 +404,10 @@ struct scene_data
                     {
                         pxy = point_3d(0, 0, 0);
                     }
+                }
+                else // method == method_mean_point
+                {
+                    pxy = p1_xy + v_xy * 0.5;
                 }
 
                 // segments between the lines
@@ -566,12 +570,9 @@ struct scene_data
         curve.push_back(p_curve_3d);
     }
 
-    void switch_method()
+    void cycle_method()
     {
-        if ( method == method_interpolate )
-            method = method_nearest;
-        else
-            method = method_interpolate;
+        method = method_type((method + 1) % 3);
     }
 
     void print_settings() const
@@ -586,8 +587,17 @@ struct scene_data
         std::cout.flush();
     }
 
-    std::string flag_str(bool f) const { return f ? "on" : "off"; }
-    std::string method_str() const { return method == method_interpolate ? "interpolate" : "nearest"; }
+    const char * flag_str(bool f) const
+    {
+        return f ? "on" : "off";
+    }
+
+    const char * method_str() const
+    {
+        return method == method_interpolate ? "interpolate" :
+               method == method_nearest ? "nearest" :
+               "mean point";
+    }
 
 } data;
 
@@ -787,7 +797,7 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
     }
     else if ( key == 'm' )
     {
-        data.switch_method();
+        data.cycle_method();
     }
     else if ( key == '1' )
     {
