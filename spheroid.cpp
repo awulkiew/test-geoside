@@ -625,7 +625,11 @@ void render_scene()
     glRotatef(pitch, -0.7, 0.7, 0);
     glRotatef(yaw, 0, 0, 1);
 
+    glLineWidth(1);
+
     draw_model();
+
+    glLineWidth(2);
 
     draw_point_adv(p1, color(1, 0.5, 0));
     draw_point_adv(p2, color(1, 1, 0));
@@ -645,11 +649,13 @@ void render_scene()
             glColor3f(1, 0.5+0.5*f, 0); // orange -> yellow
             draw_line(data.lines_experimental[i].first, data.lines_experimental[i].second);
         }
-
-        // orange -> yellow
-        draw_curve(data.curve_experimental, color(1, 0.5, 0), color(1, 1, 0));
     }
+
+    glLineWidth(3);
     
+    if ( data.enable_experimental ) // orange -> yellow
+        draw_curve(data.curve_experimental, color(1, 0.5, 0), color(1, 1, 0));
+
     if ( data.enable_mapping_geodetic ) // red
         draw_curve(data.curve_mapped_geodetic, color(0.5, 0, 0), color(1, 0, 0));
     if ( data.enable_mapping_geocentric ) // green
@@ -704,8 +710,6 @@ void resize(int w, int h)
     glEnable( GL_BLEND );
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-
-    glLineWidth(2);
 }
 
 bool left_down = false;
