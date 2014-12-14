@@ -622,7 +622,9 @@ struct scene_data
 
         for ( size_t i = 1 ; i < count ; ++i )
         {
-            result += sqrt(bg::dot_product(curve[i-1], curve[i]));
+            point_3d v_seg = curve[i] - curve[i-1];
+
+            result += sqrt(bg::dot_product(v_seg, v_seg));
         }
 
         return result;
