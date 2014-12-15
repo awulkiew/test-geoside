@@ -317,7 +317,7 @@ void normalize(point_3d & p)
 
 struct scene_data
 {
-    enum method_type { method_interpolate = 0, method_nearest, method_mean_point } method;
+    enum method_type { method_interpolate = 0, method_nearest, method_mean_point, method_interpolate_vertically } method;
     bool enable_experimental;
     bool enable_mapping_geodetic;
     bool enable_mapping_geocentric;
@@ -405,9 +405,32 @@ struct scene_data
                         pxy = point_3d(0, 0, 0);
                     }
                 }
-                else // method == method_mean_point
+                else if ( method == method_mean_point )
                 {
                     pxy = p1_xy + v_xy * 0.5;
+                }
+                else if ( method == method_interpolate_vertically )
+                {
+                    point_3d v1 = p1_xy - p1_s;
+                    point_3d v2 = p2_xy - p2_s;
+                    // 0=ox+dx*t
+                    // 0=yx+dy*t
+                    // z=oz+dz*t
+                    double t1 = - bg::get<0>(p1_s) / bg::get<0>(v1);
+                    double t2 = - bg::get<0>(p2_s) / bg::get<0>(v2);
+                    point_3d p1_v = p1_s + v1 * t1;
+                    point_3d p2_v = p2_s + v2 * t2;
+
+                    // for display purposes
+                    p1_xy = p1_v;
+                    p2_xy = p2_v;
+                    v_xy = p2_xy - p1_xy;
+
+                    pxy = p1_xy + v_xy * f;
+                }
+                else
+                {
+                    BOOST_ASSERT(false);
                 }
 
                 // segments between the lines
@@ -572,7 +595,7 @@ struct scene_data
 
     void cycle_method()
     {
-        method = method_type((method + 1) % 3);
+        method = method_type((method + 1) % 4);
     }
 
     void print_settings() const
@@ -597,7 +620,8 @@ struct scene_data
     {
         return method == method_interpolate ? "interpolate" :
                method == method_nearest ? "nearest" :
-               "mean point";
+               method == method_mean_point ? "mean point" :
+               "interpolate vertically";
     }
 
     void print_curve_lengths() const
