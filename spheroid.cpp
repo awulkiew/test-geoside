@@ -842,6 +842,16 @@ void print_geometry()
     std::cout << "flattening: " << (a - b) / a << std::endl;
 }
 
+void print_distances()
+{
+    std::cout << "DISTANCES\n"
+              << "vincenty:  " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
+              << "andoyer:   " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
+              << "haversine: " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n';
+                  
+        std::cout.flush();
+}
+
 void move_lat(point_geo & p, double diff)
 {
     double l = bg::get<1>(p) + diff;
@@ -939,6 +949,7 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 
         data.recalculate(p1, p2);
         data.print_curve_lengths();
+        print_distances();
     }
 }
 
@@ -955,6 +966,7 @@ int main(int argc, char **argv)
 
     data.recalculate(p1, p2);
     data.print_curve_lengths();
+    print_distances();
     
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DEPTH | GLUT_SINGLE | GLUT_RGBA);
