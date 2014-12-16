@@ -41,10 +41,16 @@ color operator+(color const& l, color const& r) { return color(l.r+r.r, l.g+r.g,
 color operator-(color const& l, color const& r) { return color(l.r-r.r, l.g-r.g, l.b-r.b, l.a-r.a); }
 color operator*(color const& l, float f) { return color(l.r*f, l.g*f, l.b*f, l.a*f); }
 
+point_3d operator+(point_3d const& p1, point_3d const& p2) { point_3d res = p1; bg::add_point(res, p2); return res; }
+point_3d operator-(point_3d const& p1, point_3d const& p2) { point_3d res = p1; bg::subtract_point(res, p2); return res; }
+point_3d operator*(point_3d const& p1, double v) { point_3d res = p1; bg::multiply_value(res, v); return res; }
+point_3d operator/(point_3d const& p1, double v) { point_3d res = p1; bg::divide_value(res, v); return res; }
+
 void convert(point_geo const& p, point_3d & res)
 {
     double lon = bg::get_as_radian<0>(p);
     double lat = bg::get_as_radian<1>(p);
+    lat = atan(b/a*tan(lat)); // geodesic lat to geocentric lat
     double cos_lat = cos(lat);
     bg::set<0>(res, a * cos_lat * cos(lon));
     bg::set<1>(res, a * cos_lat * sin(lon));
@@ -196,6 +202,8 @@ void draw_meridian(double lon, double step = pi/32)
 
 void draw_parallel(double lat, double step = pi/32)
 {
+    lat = atan(b/a*tan(lat)); // geodesic lat to geocentric lat
+
     glBegin(GL_LINE_STRIP);
     for (double lon = 0 ; lon < 2*pi+step ; lon += step)
     {
@@ -300,11 +308,6 @@ void draw_point_adv(point_geo const& p, color const& c)
     draw_line(point_3d(0, 0, 0), p_xy);
     draw_line(p_xy_geod, p);
 }
-
-point_3d operator+(point_3d const& p1, point_3d const& p2) { point_3d res = p1; bg::add_point(res, p2); return res; }
-point_3d operator-(point_3d const& p1, point_3d const& p2) { point_3d res = p1; bg::subtract_point(res, p2); return res; }
-point_3d operator*(point_3d const& p1, double v) { point_3d res = p1; bg::multiply_value(res, v); return res; }
-point_3d operator/(point_3d const& p1, double v) { point_3d res = p1; bg::divide_value(res, v); return res; }
 
 void normalize(point_3d & p)
 {
