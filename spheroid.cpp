@@ -320,7 +320,7 @@ void normalize(point_3d & p)
 
 struct scene_data
 {
-    enum method_type { method_interpolate = 0, method_nearest, method_mean_point, method_interpolate_vertically } method;
+    enum method_type { method_mean_point = 0, method_interpolate, method_interpolate_vertically, method_nearest } method;
     bool enable_experimental;
     bool enable_mapping_geodetic;
     bool enable_mapping_geocentric;
@@ -346,7 +346,7 @@ struct scene_data
 
     scene_data()
     {
-        method = method_interpolate;
+        method = method_mean_point;
         enable_experimental = true;
         enable_mapping_geodetic = true;
         enable_mapping_geocentric = true;
