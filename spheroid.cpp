@@ -334,6 +334,20 @@ std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& 
     double lon2 = bg::get_as_radian<0>(p2);
     double lat2 = bg::get_as_radian<1>(p2);
 
+    if ( bg::math::equals(lon1, lon2)
+      && bg::math::equals(lat1, lat2) )
+    {
+        return std::make_pair(0.0, 0.0);
+    }
+
+    double pi_half = bg::math::pi<double>() / 2;
+
+    if ( bg::math::equals(bg::math::abs(lat1), pi_half)
+      && bg::math::equals(bg::math::abs(lat2), pi_half) )
+    {
+        // TODO: azimuth = 0 or pi
+    }
+
     double a = bg::get_radius<0>(sph);
     double f = bg::detail::flattening<double>(sph);
 
@@ -346,23 +360,45 @@ std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& 
     double sin_lat2 = sin(lat2);
     double cos_lat2 = cos(lat2);
 
+    // H,G,T = infinity if cos_d = 1 or cos_d = -1
+    // lat1 == +-90 && lat2 == +-90
+    // lat1 == lat2 && lon1 == lon2
     double cos_d = sin_lat1*sin_lat2 + cos_lat1*cos_lat2*cos_dlon;
     double d = acos(cos_d);
     double sin_d = sin(d); // sign lost?
 
     double K = bg::math::sqr(sin_lat1-sin_lat2);
     double L = bg::math::sqr(sin_lat1+sin_lat2);
-    double H = (d+3*sin_d)/(1-cos_d);
-    double G = (d-3*sin_d)/(1+cos_d);
+    double three_sin_d = 3*sin_d;
+    // H or G = infinity if cos_d = 1 or cos_d = -1
+    double H = (d+three_sin_d)/(1-cos_d);
+    double G = (d-three_sin_d)/(1+cos_d);
 
+    // for e.g. lat1=-90 && lat2=90 here we have G*L=INF*0
     double dd = -(f/4)*(H*K+G*L);
     double distance = a * (d + dd);
 
-    double M = cos_lat1*sin_lat2/cos_lat2-sin_lat1*cos_dlon;
-    double N = cos_lat2*sin_lat1/cos_lat1-sin_lat2*cos_dlon;
-    double A = atan2(sin_dlon, M);
-    double B = atan2(sin_dlon, N);
+    // NOTE: if both cos_latX == 0 then below we'd have 0 * INF
+    // it's a situation then the endpoints are on the poles +-90 deg
+    // in this case the azimuth could either be 0 or +-pi
 
+    double A = 0;
+    if ( !bg::math::equals(cos_lat2, 0.0) )
+    {
+        double tan_lat2 = sin_lat2/cos_lat2;
+        double M = cos_lat1*tan_lat2-sin_lat1*cos_dlon;
+        A = atan2(sin_dlon, M);
+    }
+
+    double B = 0;
+    if ( !bg::math::equals(cos_lat1, 0.0) )
+    {
+        double tan_lat1 = sin_lat1/cos_lat1;
+        double N = cos_lat2*tan_lat1-sin_lat2*cos_dlon;
+        B = atan2(sin_dlon, N);
+    }
+    
+    // infinity if sin_d = 0, so cos_d = 1 or cos_d = -1
     double T = d / sin_d;
     double sin_2A = sin(2*A);
     double sin_2B = sin(2*B);
@@ -656,7 +692,7 @@ struct scene_data
             }
 
             //recalculate_azimuth(azi);
-            recalculate_azimuth(andoyer_inverse(p1, p2, sph).second);
+            recalculate_azimuth(p1, andoyer_inverse(p1, p2, sph).second);
         }       
     }
 
@@ -664,13 +700,29 @@ struct scene_data
     point_3d loc_north;
     point_3d v_azimuth;
 
-    void recalculate_azimuth(double azimuth)
+    void recalculate_azimuth(point_geo const& p1, double azimuth)
     {
-        point_3d v1_perp = p1_s - p1_xy;
-        loc_east = bg::cross_product(point_3d(0, 0, 1), v1_perp);
-        normalize(loc_east);
-        loc_north = bg::cross_product(v1_perp, loc_east);
-        normalize(loc_north);
+        if ( bg::math::equals(bg::get<0>(p1_s), 0.0)
+          && bg::math::equals(bg::get<1>(p1_s), 0.0) )
+        {
+            double lon = bg::get_as_radian<0>(p1);
+
+            bg::set<0>(loc_north, cos(lon));
+            bg::set<1>(loc_north, sin(lon));
+            bg::set<2>(loc_north, 0);
+
+            bg::set<0>(loc_east, -sin(lon));
+            bg::set<1>(loc_east, cos(lon));
+            bg::set<2>(loc_east, 0);
+        }
+        else
+        {
+            point_3d v1_perp = p1_s - p1_xy;
+            loc_east = bg::cross_product(point_3d(0, 0, 1), v1_perp);
+            normalize(loc_east);
+            loc_north = bg::cross_product(v1_perp, loc_east);
+            normalize(loc_north);
+        }
         v_azimuth = loc_north * cos(azimuth) + loc_east * sin(azimuth);
     }
 
@@ -862,9 +914,9 @@ void render_scene()
 
     // azimuth
     glColor3f(1, 0, 0);
-    draw_line(data.p1_s, data.p1_s + data.loc_east*0.2);
-    glColor3f(0, 1, 0);
     draw_line(data.p1_s, data.p1_s + data.loc_north*0.2);
+    glColor3f(0, 1, 0);
+    draw_line(data.p1_s, data.p1_s + data.loc_east*0.2);
     glColor3f(1, 1, 1);
     draw_line(data.p1_s, data.p1_s + data.v_azimuth*0.3);
 
@@ -965,22 +1017,24 @@ void print_geometry()
     std::cout << "flattening: " << (a - b) / a << std::endl;
 }
 
-void print_distances()
+void print_distances_and_azimuths()
 {
     std::cout << "DISTANCES\n"
               << "vincenty:  " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
               << "andoyer:   " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
               << "haversine: " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n'
-              << "andoyer2:  " << andoyer_inverse(p1, p2, sph).first;
+              << "andoyer2:  " << andoyer_inverse(p1, p2, sph).first << '\n';
+    std::cout << "AZIMUTHS\n"
+              << "andoyer2:  " << andoyer_inverse(p1, p2, sph).second << '\n';
                   
-        std::cout.flush();
+    std::cout.flush();
 }
 
 void move_lat(point_geo & p, double diff)
 {
     double l = bg::get<1>(p) + diff;
-    if ( l > 89 ) l = 89;
-    if ( l < -89 ) l = -89;
+    if ( l > 90 ) l = 90;
+    if ( l < -90 ) l = -90;
     bg::set<1>(p, l);
 }
 
@@ -1073,7 +1127,7 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 
         data.recalculate(p1, p2);
         data.print_curve_lengths();
-        print_distances();
+        print_distances_and_azimuths();
     }
 }
 
@@ -1090,7 +1144,7 @@ int main(int argc, char **argv)
 
     data.recalculate(p1, p2);
     data.print_curve_lengths();
-    print_distances();
+    print_distances_and_azimuths();
     
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DEPTH | GLUT_SINGLE | GLUT_RGBA);
