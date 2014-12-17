@@ -318,6 +318,120 @@ void normalize(point_3d & p)
     }
 }
 
+double degree(double a, double m, double s)
+{
+    double sign = a >= 0 ? 1 : -1;
+    return sign * ( fabs(a) + fabs(m)/60 + fabs(s)/3600 );
+}
+
+std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& p2, spheroid const& sph)
+{
+    // From: Technical Report: PAUL D. THOMAS, MATHEMATICAL MODELS FOR NAVIGATION SYSTEMS, 1965
+    // Order 1
+
+    double lon1 = bg::get_as_radian<0>(p1);
+    double lat1 = bg::get_as_radian<1>(p1);
+    double lon2 = bg::get_as_radian<0>(p2);
+    double lat2 = bg::get_as_radian<1>(p2);
+
+    double a = bg::get_radius<0>(sph);
+    double f = bg::detail::flattening<double>(sph);
+
+    // VER 1
+    double dlon = lon2 - lon1;
+    double sin_dlon = sin(dlon);
+    double cos_dlon = cos(dlon);
+    double sin_lat1 = sin(lat1);
+    double cos_lat1 = cos(lat1);
+    double sin_lat2 = sin(lat2);
+    double cos_lat2 = cos(lat2);
+
+    double cos_d = sin_lat1*sin_lat2 + cos_lat1*cos_lat2*cos_dlon;
+    double d = acos(cos_d);
+    double sin_d = sin(d); // sign lost?
+
+    double K = bg::math::sqr(sin_lat1-sin_lat2);
+    double L = bg::math::sqr(sin_lat1+sin_lat2);
+    double H = (d+3*sin_d)/(1-cos_d);
+    double G = (d-3*sin_d)/(1+cos_d);
+
+    double dd = -(f/4)*(H*K+G*L);
+    double distance = a * (d + dd);
+
+    double M = cos_lat1*sin_lat2/cos_lat2-sin_lat1*cos_dlon;
+    double N = cos_lat2*sin_lat1/cos_lat1-sin_lat2*cos_dlon;
+    double A = atan2(sin_dlon, M);
+    double B = atan2(sin_dlon, N);
+
+    double T = d / sin_d;
+    double sin_2A = sin(2*A);
+    double sin_2B = sin(2*B);
+    double U = (f/2)*bg::math::sqr(cos_lat1)*sin_2A;
+    double V = (f/2)*bg::math::sqr(cos_lat2)*sin_2B;
+    double dA = V*T-U;
+
+    double azimuth = A - dA;
+
+    return std::make_pair(distance, azimuth);
+
+    // VER 2 - azimuth isn't calculated properly
+    //double dlon = lon1 - lon2;
+    //double dlon_m = dlon / 2;
+    //double lat_m = (lat1 + lat2) / 2;
+    //double dlat_m = (lat2 - lat1) / 2;
+
+    //double sin_lat_m = sin(lat_m);
+    //double cos_lat_m = cos(lat_m);
+    //double sin_dlat_m = sin(dlat_m);
+    //double cos_dlat_m = cos(dlat_m);
+    //double sin_dlon = sin(dlon);
+    //double sin_dlon_m = sin(dlon_m);
+
+    //double cos2_lat_m = cos_lat_m * cos_lat_m;
+    //double sin2_dlat_m = sin_dlat_m * sin_dlat_m;
+    //double sin2_dlon_m = sin_dlon_m * sin_dlon_m;
+
+    //double k = sin_lat_m * cos_dlat_m;
+    //double K = sin_dlat_m * cos_lat_m;
+    //double H = cos2_lat_m - sin2_dlat_m;
+    //double L = sin2_dlat_m + H * sin2_dlon_m;
+
+    //double cos_d = 1 - 2 * L;
+    //double d = acos(cos_d);
+    //double sin_d = sin(d); // sign lost?
+    //double T = d / sin_d;
+
+    //double U = 2 * k*k / (1-L);
+    //double V = 2 * K*K / L;
+    //double E = 30 * cos_d;
+    //double X = U + V;
+    //double Y = U - V;
+    //double D = 4 * (6 + T*T);
+
+    //double A = 4 * T * (8 + E * T / 15);
+    //double C = T - (A + E) / 2;
+    //double B = -2 * D;
+
+    //double df = -(f/4)*(T*X-3*Y);
+    //double S1 = a*sin_d*(T + df);
+    //
+    //double sin_a2_plus_a1 = K*sin_dlon/L;
+    //double sin_a2_minus_a1 = k*sin_dlon/(1-L);
+
+    //double half_da2_plus_da1 = -(f/2)*H*(T+1)*sin_a2_plus_a1;
+    //double half_da2_minus_da1 = -(f/2)*H*(T-1)*sin_a2_minus_a1;
+    //
+    //double a2_plus_a1 = asin(sin_a2_plus_a1);
+    //double a2_minus_a1 = asin(sin_a2_minus_a1);
+
+    //double a1 = (a2_plus_a1 - a2_minus_a1) / 2;
+    //double da1 = half_da2_plus_da1 - half_da2_minus_da1;
+    //
+    //double a12 = a1 + da1;
+
+    //return std::make_pair(S1, a12);
+}
+
 struct scene_data
 {
     enum method_type { method_mean_point = 0, method_interpolate, method_interpolate_vertically, method_nearest } method;
@@ -541,14 +655,23 @@ struct scene_data
                 curve_vincenty.push_back(pcast<point_3d>(p));
             }
 
-            // calculate the azimuth vector
-            /*point_3d v1_perp = p1_s - p1_xy;
-            point_3d loc_east = bg::cross_product(point_3d(0, 0, 1), v1_perp);
-            normalize(loc_east);
-            point_3d loc_north = bg::cross_product(v1_perp, loc_east);
-            normalize(loc_north);
-            point_3d v_azi = loc_north * cos(azi) + loc_east * sin(azi);*/
-        }
+            //recalculate_azimuth(azi);
+            recalculate_azimuth(andoyer_inverse(p1, p2, sph).second);
+        }       
+    }
+
+    point_3d loc_east;
+    point_3d loc_north;
+    point_3d v_azimuth;
+
+    void recalculate_azimuth(double azimuth)
+    {
+        point_3d v1_perp = p1_s - p1_xy;
+        loc_east = bg::cross_product(point_3d(0, 0, 1), v1_perp);
+        normalize(loc_east);
+        loc_north = bg::cross_product(v1_perp, loc_east);
+        normalize(loc_north);
+        v_azimuth = loc_north * cos(azimuth) + loc_east * sin(azimuth);
     }
 
     void recalculate_mapped(point_geo const& p1,
@@ -705,7 +828,7 @@ void render_scene()
     glColor3f(1, 1, 1);
     draw_line(data.p1_s, data.p2_s);
     draw_line(data.p1_xy, data.p2_xy);
-    
+
     // draw experimental lines
     if ( data.enable_experimental )
     {
@@ -737,13 +860,13 @@ void render_scene()
     if ( data.enable_vincenty ) // gray->white
         draw_curve(data.curve_vincenty, color(0.75, 0.75, 0.75), color(1, 1, 1));
 
-    // vincenty azimuth 
-    /*glColor3f(1, 0, 0);
-    draw_line(p1_s, p1_s + loc_east*0.2);
+    // azimuth
+    glColor3f(1, 0, 0);
+    draw_line(data.p1_s, data.p1_s + data.loc_east*0.2);
     glColor3f(0, 1, 0);
-    draw_line(p1_s, p1_s + loc_north*0.2);
+    draw_line(data.p1_s, data.p1_s + data.loc_north*0.2);
     glColor3f(1, 1, 1);
-    draw_line(p1_s, p1_s + v_azi*0.3);*/
+    draw_line(data.p1_s, data.p1_s + data.v_azimuth*0.3);
 
     glPopMatrix();
     glFlush();
@@ -847,7 +970,8 @@ void print_distances()
     std::cout << "DISTANCES\n"
               << "vincenty:  " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
               << "andoyer:   " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
-              << "haversine: " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n';
+              << "haversine: " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n'
+              << "andoyer2:  " << andoyer_inverse(p1, p2, sph).first;
                   
         std::cout.flush();
 }
