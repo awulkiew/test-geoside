@@ -345,7 +345,7 @@ std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& 
     if ( bg::math::equals(bg::math::abs(lat1), pi_half)
       && bg::math::equals(bg::math::abs(lat2), pi_half) )
     {
-        // TODO: azimuth = 0 or pi
+        return std::make_pair(0.0, 0.0);
     }
 
     double a = bg::get_radius<0>(sph);
@@ -365,7 +365,13 @@ std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& 
     // lat1 == lat2 && lon1 == lon2
     double cos_d = sin_lat1*sin_lat2 + cos_lat1*cos_lat2*cos_dlon;
     double d = acos(cos_d);
-    double sin_d = sin(d); // sign lost?
+    double sin_d = sin(d);
+
+    // just in case since above lat1 and lat2 is checked
+    if ( bg::math::equals(sin_d, 0.0) )
+    {
+        return std::make_pair(0.0, 0.0);
+    }
 
     double K = bg::math::sqr(sin_lat1-sin_lat2);
     double L = bg::math::sqr(sin_lat1+sin_lat2);
@@ -383,29 +389,29 @@ std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& 
     // in this case the azimuth could either be 0 or +-pi
 
     double A = 0;
+    double U = 0;
     if ( !bg::math::equals(cos_lat2, 0.0) )
     {
         double tan_lat2 = sin_lat2/cos_lat2;
         double M = cos_lat1*tan_lat2-sin_lat1*cos_dlon;
         A = atan2(sin_dlon, M);
+        double sin_2A = sin(2*A);
+        U = (f/2)*bg::math::sqr(cos_lat1)*sin_2A;
     }
 
-    double B = 0;
+    double V = 0;
     if ( !bg::math::equals(cos_lat1, 0.0) )
     {
         double tan_lat1 = sin_lat1/cos_lat1;
         double N = cos_lat2*tan_lat1-sin_lat2*cos_dlon;
-        B = atan2(sin_dlon, N);
+        double B = atan2(sin_dlon, N);
+        double sin_2B = sin(2*B);
+        V = (f/2)*bg::math::sqr(cos_lat2)*sin_2B;
     }
     
     // infinity if sin_d = 0, so cos_d = 1 or cos_d = -1
     double T = d / sin_d;
-    double sin_2A = sin(2*A);
-    double sin_2B = sin(2*B);
-    double U = (f/2)*bg::math::sqr(cos_lat1)*sin_2A;
-    double V = (f/2)*bg::math::sqr(cos_lat2)*sin_2B;
     double dA = V*T-U;
-
     double azimuth = A - dA;
 
     return std::make_pair(distance, azimuth);
@@ -1019,13 +1025,16 @@ void print_geometry()
 
 void print_distances_and_azimuths()
 {
+    std::pair<double, double> ai_res = andoyer_inverse(p1, p2, sph);
+
     std::cout << "DISTANCES\n"
               << "vincenty:  " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
               << "andoyer:   " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
               << "haversine: " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n'
-              << "andoyer2:  " << andoyer_inverse(p1, p2, sph).first << '\n';
+              << "andoyer2:  " << ai_res.first << '\n';
     std::cout << "AZIMUTHS\n"
-              << "andoyer2:  " << andoyer_inverse(p1, p2, sph).second << '\n';
+              << "vincenty:  " << bg::detail::azimuth<double>(p1, p2, sph) << '\n'
+              << "andoyer2:  " << ai_res.second << '\n';
                   
     std::cout.flush();
 }
