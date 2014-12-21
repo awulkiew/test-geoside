@@ -474,6 +474,87 @@ std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& 
     //return std::make_pair(S1, a12);
 }
 
+std::pair<double, double> andoyer_inverse_2nd(point_geo const& p1, point_geo const& p2, spheroid const& sph)
+{
+    double lon1 = bg::get_as_radian<0>(p1);
+    double lat1 = bg::get_as_radian<1>(p1);
+    double lon2 = bg::get_as_radian<0>(p2);
+    double lat2 = bg::get_as_radian<1>(p2);
+
+    double a = bg::get_radius<0>(sph);
+    double f = bg::detail::flattening<double>(sph);
+
+    // From: Technical Report: Thomas 1970 - Spheroidal Geodesics, Reference Systems and Local Geometry
+
+    double tan_theta1 = (1 - f) * tan(lat1);
+    double tan_theta2 = (1 - f) * tan(lat2);
+    double theta1 = atan(tan_theta1);
+    double theta2 = atan(tan_theta2);
+
+    double theta_m = (theta1 + theta2) / 2;
+    double d_theta_m = (theta2 - theta1) / 2;
+    double d_lambda = lon2 - lon1;
+    double d_lambda_m = d_lambda / 2;
+
+    double sin_theta_m = sin(theta_m);
+    double cos_theta_m = cos(theta_m);
+    double sin_d_theta_m = sin(d_theta_m);
+    double cos_d_theta_m = cos(d_theta_m);
+    double sin2_theta_m = bg::math::sqr(sin_theta_m);
+    double cos2_theta_m = bg::math::sqr(cos_theta_m);
+    double sin2_d_theta_m = bg::math::sqr(sin_d_theta_m);
+    double cos2_d_theta_m = bg::math::sqr(cos_d_theta_m);
+    double sin_d_lambda_m = sin(d_lambda_m);
+    double sin2_d_lambda_m = bg::math::sqr(sin_d_lambda_m);
+
+    double H = cos2_theta_m - sin2_d_theta_m;
+    double L = sin2_d_theta_m + H * sin2_d_lambda_m;
+    double cos_d = 1 - 2 * L;
+    double d = acos(cos_d);
+    double sin_d = sin(d);
+    double U = 2 * sin2_theta_m * cos2_d_theta_m / (1 - L);
+    double V = 2 * sin2_d_theta_m * cos2_theta_m / L;
+    double X = U + V;
+    double Y = U - V;
+    double T = d / sin_d;
+    double D = 4 * bg::math::sqr(T);
+    double E = 2 * cos_d;
+    double A = D * E;
+    double B = 2 * D;
+    double C = T - (A - E) / 2;
+
+    double n1 = X * (A + C*X);
+    double n2 = Y * (B + E*Y);
+    double n3 = D*X*Y;
+
+    double f_sqr = bg::math::sqr(f);
+    double f_sqr_per_64 = f_sqr / 64;
+
+    double delta1d = f * (T*X-Y) / 4;
+    double delta2d = f_sqr_per_64 * (n1 - n2 + n3);
+
+    double S1 = a * sin_d * (T - delta1d);
+    //double S2 = a * sin_d * (T - delta1d + delta2d);
+
+    double F = 2*Y-E*(4-X);
+    double M = 32*T-(20*T-A)*X-(B+4)*Y;
+    double G = f*T/2 + f_sqr_per_64;
+    double tan_d_lambda = tan(d_lambda);
+    double Q = -(F*G*tan_d_lambda) / 4;
+
+    double d_lambda_p = (d_lambda + Q) / 2;
+    double tan_d_lambda_p = tan(d_lambda_p);
+
+    double v = atan2(cos_d_theta_m, sin_theta_m * tan_d_lambda_p);
+    double u = atan2(-sin_d_theta_m, cos_theta_m * tan_d_lambda_p);
+
+    double alpha1 = v + u;
+    if ( alpha1 > bg::math::pi<double>() )
+        alpha1 -= 2 * bg::math::pi<double>();
+
+    return std::make_pair(S1, alpha1);
+}
+
 struct scene_data
 {
     enum method_type { method_mean_point = 0, method_interpolate, method_interpolate_vertically, method_nearest } method;
@@ -1026,15 +1107,18 @@ void print_geometry()
 void print_distances_and_azimuths()
 {
     std::pair<double, double> ai_res = andoyer_inverse(p1, p2, sph);
+    std::pair<double, double> ai2_res = andoyer_inverse_2nd(p1, p2, sph);
 
     std::cout << "DISTANCES\n"
               << "vincenty:  " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
               << "andoyer:   " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
               << "haversine: " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n'
-              << "andoyer2:  " << ai_res.first << '\n';
+              << "andoyer1:  " << ai_res.first << '\n'
+              << "andoyer2:  " << ai2_res.first << '\n';
     std::cout << "AZIMUTHS\n"
               << "vincenty:  " << bg::detail::azimuth<double>(p1, p2, sph) << '\n'
-              << "andoyer2:  " << ai_res.second << '\n';
+              << "andoyer1:  " << ai_res.second << '\n'
+              << "andoyer2:  " << ai2_res.second << '\n';
                   
     std::cout.flush();
 }
@@ -1147,6 +1231,11 @@ void idle_fun()
 
 int main(int argc, char **argv)
 {
+    //test
+    point_geo pp1(degree(0, 0, 0), degree(20, 0, 0));
+    point_geo pp2(degree(106, 0, 0), degree(45, 0, 0));
+    andoyer_inverse_2nd(pp1, pp2, spheroid());
+
     print_help();
     print_geometry();
     data.print_settings();
