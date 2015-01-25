@@ -324,155 +324,20 @@ double degree(double a, double m, double s)
     return sign * ( fabs(a) + fabs(m)/60 + fabs(s)/3600 );
 }
 
+#include "andoyer_inverse.hpp"
+
 std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& p2, spheroid const& sph)
 {
-    // From: Technical Report: PAUL D. THOMAS, MATHEMATICAL MODELS FOR NAVIGATION SYSTEMS, 1965
-    // Order 1
-
     double lon1 = bg::get_as_radian<0>(p1);
     double lat1 = bg::get_as_radian<1>(p1);
     double lon2 = bg::get_as_radian<0>(p2);
     double lat2 = bg::get_as_radian<1>(p2);
 
-    if ( bg::math::equals(lon1, lon2)
-      && bg::math::equals(lat1, lat2) )
-    {
-        return std::make_pair(0.0, 0.0);
-    }
-
-    double pi_half = bg::math::pi<double>() / 2;
-
-    if ( bg::math::equals(bg::math::abs(lat1), pi_half)
-      && bg::math::equals(bg::math::abs(lat2), pi_half) )
-    {
-        return std::make_pair(0.0, 0.0);
-    }
-
-    double a = bg::get_radius<0>(sph);
-    double f = bg::detail::flattening<double>(sph);
-
-    // VER 1
-    double dlon = lon2 - lon1;
-    double sin_dlon = sin(dlon);
-    double cos_dlon = cos(dlon);
-    double sin_lat1 = sin(lat1);
-    double cos_lat1 = cos(lat1);
-    double sin_lat2 = sin(lat2);
-    double cos_lat2 = cos(lat2);
-
-    // H,G,T = infinity if cos_d = 1 or cos_d = -1
-    // lat1 == +-90 && lat2 == +-90
-    // lat1 == lat2 && lon1 == lon2
-    double cos_d = sin_lat1*sin_lat2 + cos_lat1*cos_lat2*cos_dlon;
-    double d = acos(cos_d);
-    double sin_d = sin(d);
-
-    // just in case since above lat1 and lat2 is checked
-    if ( bg::math::equals(sin_d, 0.0) )
-    {
-        return std::make_pair(0.0, 0.0);
-    }
-
-    double K = bg::math::sqr(sin_lat1-sin_lat2);
-    double L = bg::math::sqr(sin_lat1+sin_lat2);
-    double three_sin_d = 3*sin_d;
-    // H or G = infinity if cos_d = 1 or cos_d = -1
-    double H = (d+three_sin_d)/(1-cos_d);
-    double G = (d-three_sin_d)/(1+cos_d);
-
-    // for e.g. lat1=-90 && lat2=90 here we have G*L=INF*0
-    double dd = -(f/4)*(H*K+G*L);
-    double distance = a * (d + dd);
-
-    // NOTE: if both cos_latX == 0 then below we'd have 0 * INF
-    // it's a situation then the endpoints are on the poles +-90 deg
-    // in this case the azimuth could either be 0 or +-pi
-
-    double A = 0;
-    double U = 0;
-    if ( !bg::math::equals(cos_lat2, 0.0) )
-    {
-        double tan_lat2 = sin_lat2/cos_lat2;
-        double M = cos_lat1*tan_lat2-sin_lat1*cos_dlon;
-        A = atan2(sin_dlon, M);
-        double sin_2A = sin(2*A);
-        U = (f/2)*bg::math::sqr(cos_lat1)*sin_2A;
-    }
-
-    double V = 0;
-    if ( !bg::math::equals(cos_lat1, 0.0) )
-    {
-        double tan_lat1 = sin_lat1/cos_lat1;
-        double N = cos_lat2*tan_lat1-sin_lat2*cos_dlon;
-        double B = atan2(sin_dlon, N);
-        double sin_2B = sin(2*B);
-        V = (f/2)*bg::math::sqr(cos_lat2)*sin_2B;
-    }
-    
-    // infinity if sin_d = 0, so cos_d = 1 or cos_d = -1
-    double T = d / sin_d;
-    double dA = V*T-U;
-    double azimuth = A - dA;
-
-    return std::make_pair(distance, azimuth);
-
-    // VER 2 - azimuth isn't calculated properly
-    //double dlon = lon1 - lon2;
-    //double dlon_m = dlon / 2;
-    //double lat_m = (lat1 + lat2) / 2;
-    //double dlat_m = (lat2 - lat1) / 2;
-
-    //double sin_lat_m = sin(lat_m);
-    //double cos_lat_m = cos(lat_m);
-    //double sin_dlat_m = sin(dlat_m);
-    //double cos_dlat_m = cos(dlat_m);
-    //double sin_dlon = sin(dlon);
-    //double sin_dlon_m = sin(dlon_m);
-
-    //double cos2_lat_m = cos_lat_m * cos_lat_m;
-    //double sin2_dlat_m = sin_dlat_m * sin_dlat_m;
-    //double sin2_dlon_m = sin_dlon_m * sin_dlon_m;
-
-    //double k = sin_lat_m * cos_dlat_m;
-    //double K = sin_dlat_m * cos_lat_m;
-    //double H = cos2_lat_m - sin2_dlat_m;
-    //double L = sin2_dlat_m + H * sin2_dlon_m;
-
-    //double cos_d = 1 - 2 * L;
-    //double d = acos(cos_d);
-    //double sin_d = sin(d); // sign lost?
-    //double T = d / sin_d;
-
-    //double U = 2 * k*k / (1-L);
-    //double V = 2 * K*K / L;
-    //double E = 30 * cos_d;
-    //double X = U + V;
-    //double Y = U - V;
-    //double D = 4 * (6 + T*T);
-
-    //double A = 4 * T * (8 + E * T / 15);
-    //double C = T - (A + E) / 2;
-    //double B = -2 * D;
-
-    //double df = -(f/4)*(T*X-3*Y);
-    //double S1 = a*sin_d*(T + df);
-    //
-    //double sin_a2_plus_a1 = K*sin_dlon/L;
-    //double sin_a2_minus_a1 = k*sin_dlon/(1-L);
-
-    //double half_da2_plus_da1 = -(f/2)*H*(T+1)*sin_a2_plus_a1;
-    //double half_da2_minus_da1 = -(f/2)*H*(T-1)*sin_a2_minus_a1;
-    //
-    //double a2_plus_a1 = asin(sin_a2_plus_a1);
-    //double a2_minus_a1 = asin(sin_a2_minus_a1);
-
-    //double a1 = (a2_plus_a1 - a2_minus_a1) / 2;
-    //double da1 = half_da2_plus_da1 - half_da2_minus_da1;
-    //
-    //double a12 = a1 + da1;
-
-    //return std::make_pair(S1, a12);
+    bg::detail::andoyer_inverse<double> ai(lon1, lat1, lon2, lat2, sph);
+    return std::make_pair(ai.distance(), ai.azimuth());
 }
+
+#include "thomas_inverse.hpp"
 
 std::pair<double, double> andoyer_inverse_2nd(point_geo const& p1, point_geo const& p2, spheroid const& sph)
 {
@@ -481,78 +346,8 @@ std::pair<double, double> andoyer_inverse_2nd(point_geo const& p1, point_geo con
     double lon2 = bg::get_as_radian<0>(p2);
     double lat2 = bg::get_as_radian<1>(p2);
 
-    double a = bg::get_radius<0>(sph);
-    double f = bg::detail::flattening<double>(sph);
-
-    // From: Technical Report: Thomas 1970 - Spheroidal Geodesics, Reference Systems and Local Geometry
-
-    double tan_theta1 = (1 - f) * tan(lat1);
-    double tan_theta2 = (1 - f) * tan(lat2);
-    double theta1 = atan(tan_theta1);
-    double theta2 = atan(tan_theta2);
-
-    double theta_m = (theta1 + theta2) / 2;
-    double d_theta_m = (theta2 - theta1) / 2;
-    double d_lambda = lon2 - lon1;
-    double d_lambda_m = d_lambda / 2;
-
-    double sin_theta_m = sin(theta_m);
-    double cos_theta_m = cos(theta_m);
-    double sin_d_theta_m = sin(d_theta_m);
-    double cos_d_theta_m = cos(d_theta_m);
-    double sin2_theta_m = bg::math::sqr(sin_theta_m);
-    double cos2_theta_m = bg::math::sqr(cos_theta_m);
-    double sin2_d_theta_m = bg::math::sqr(sin_d_theta_m);
-    double cos2_d_theta_m = bg::math::sqr(cos_d_theta_m);
-    double sin_d_lambda_m = sin(d_lambda_m);
-    double sin2_d_lambda_m = bg::math::sqr(sin_d_lambda_m);
-
-    double H = cos2_theta_m - sin2_d_theta_m;
-    double L = sin2_d_theta_m + H * sin2_d_lambda_m;
-    double cos_d = 1 - 2 * L;
-    double d = acos(cos_d);
-    double sin_d = sin(d);
-    double U = 2 * sin2_theta_m * cos2_d_theta_m / (1 - L);
-    double V = 2 * sin2_d_theta_m * cos2_theta_m / L;
-    double X = U + V;
-    double Y = U - V;
-    double T = d / sin_d;
-    double D = 4 * bg::math::sqr(T);
-    double E = 2 * cos_d;
-    double A = D * E;
-    double B = 2 * D;
-    double C = T - (A - E) / 2;
-
-    double n1 = X * (A + C*X);
-    double n2 = Y * (B + E*Y);
-    double n3 = D*X*Y;
-
-    double f_sqr = bg::math::sqr(f);
-    double f_sqr_per_64 = f_sqr / 64;
-
-    double delta1d = f * (T*X-Y) / 4;
-    double delta2d = f_sqr_per_64 * (n1 - n2 + n3);
-
-    double S1 = a * sin_d * (T - delta1d);
-    //double S2 = a * sin_d * (T - delta1d + delta2d);
-
-    double F = 2*Y-E*(4-X);
-    double M = 32*T-(20*T-A)*X-(B+4)*Y;
-    double G = f*T/2 + f_sqr_per_64;
-    double tan_d_lambda = tan(d_lambda);
-    double Q = -(F*G*tan_d_lambda) / 4;
-
-    double d_lambda_p = (d_lambda + Q) / 2;
-    double tan_d_lambda_p = tan(d_lambda_p);
-
-    double v = atan2(cos_d_theta_m, sin_theta_m * tan_d_lambda_p);
-    double u = atan2(-sin_d_theta_m, cos_theta_m * tan_d_lambda_p);
-
-    double alpha1 = v + u;
-    if ( alpha1 > bg::math::pi<double>() )
-        alpha1 -= 2 * bg::math::pi<double>();
-
-    return std::make_pair(S1, alpha1);
+    bg::detail::thomas_inverse<double> ti(lon1, lat1, lon2, lat2, sph);
+    return std::make_pair(ti.distance(), ti.azimuth());
 }
 
 struct scene_data
