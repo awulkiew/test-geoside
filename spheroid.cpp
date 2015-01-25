@@ -6,6 +6,8 @@
 
 #include <boost/geometry/algorithms/detail/vincenty_direct.hpp>
 #include <boost/geometry/algorithms/detail/vincenty_inverse.hpp>
+#include <boost/geometry/algorithms/detail/andoyer_inverse.hpp>
+#include <boost/geometry/algorithms/detail/thomas_inverse.hpp>
 
 #include <iostream>
 #include <vector>
@@ -324,8 +326,6 @@ double degree(double a, double m, double s)
     return sign * ( fabs(a) + fabs(m)/60 + fabs(s)/3600 );
 }
 
-#include "andoyer_inverse.hpp"
-
 std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& p2, spheroid const& sph)
 {
     double lon1 = bg::get_as_radian<0>(p1);
@@ -336,8 +336,6 @@ std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& 
     bg::detail::andoyer_inverse<double> ai(lon1, lat1, lon2, lat2, sph);
     return std::make_pair(ai.distance(), ai.azimuth());
 }
-
-#include "thomas_inverse.hpp"
 
 std::pair<double, double> andoyer_inverse_2nd(point_geo const& p1, point_geo const& p2, spheroid const& sph)
 {
@@ -350,6 +348,16 @@ std::pair<double, double> andoyer_inverse_2nd(point_geo const& p1, point_geo con
     return std::make_pair(ti.distance(), ti.azimuth());
 }
 
+double bearing(double rad1, double rad2)
+{
+    double d = rad1 - rad2;
+    while ( d > bg::math::pi<double>() )
+        d -= 2 * bg::math::pi<double>();
+    while ( d < -bg::math::pi<double>() )
+        d += 2 * bg::math::pi<double>();
+    return bg::math::abs(d);
+}
+
 struct scene_data
 {
     enum method_type { method_mean_point = 0, method_interpolate, method_interpolate_vertically, method_nearest } method;
@@ -359,6 +367,8 @@ struct scene_data
     bool enable_mapping_reduced;
     bool enable_great_ellipse;
     bool enable_vincenty;
+    bool enable_andoyer;
+    bool enable_thomas;
 
     std::vector<point_3d> curve_experimental;
     std::vector<std::pair<point_3d, point_3d> > lines_experimental;
@@ -367,6 +377,8 @@ struct scene_data
     std::vector<point_3d> curve_mapped_reduced;
     std::vector<point_3d> curve_great_ellipse;
     std::vector<point_3d> curve_vincenty;
+    std::vector<point_3d> curve_andoyer;
+    std::vector<point_3d> curve_thomas;
 
     point_3d p1_s; // cartesian point on surface
     point_3d p2_s; // cartesian point on surface
@@ -385,6 +397,8 @@ struct scene_data
         enable_mapping_reduced = true;
         enable_great_ellipse = true;
         enable_vincenty = true;
+        enable_andoyer = true;
+        enable_thomas = true;
     }
 
     void clear()
@@ -396,6 +410,8 @@ struct scene_data
         curve_mapped_reduced.clear();
         curve_great_ellipse.clear();
         curve_vincenty.clear();
+        curve_andoyer.clear();
+        curve_thomas.clear();
     }
 
     void recalculate(point_geo const& p1, point_geo const& p2)
@@ -542,40 +558,82 @@ struct scene_data
         }
 
         // vincenty
+        if ( enable_vincenty )
         {
-            // calculate the azimuth and distance from p1 to p2
-            bg::detail::vincenty_inverse<double> vi(bg::get_as_radian<0>(p1),
-                                                    bg::get_as_radian<1>(p1),
-                                                    bg::get_as_radian<0>(p2),
-                                                    bg::get_as_radian<1>(p2),
-                                                    sph);
-            double azi = vi.azimuth12();
-            double dist = vi.distance();
-
-            double f = 0;
-            for ( int i = 0 ; i <= count ; ++i, f += f_step )
-            {
-                // current distance (fraction of the whole distance)
-                double d = f * dist;
-                // calculate the position of p2 for given d and azimuth
-                bg::detail::vincenty_direct<double> vd(bg::get_as_radian<0>(p1),
-                                                       bg::get_as_radian<1>(p1),
-                                                       d,
-                                                       azi,
-                                                       sph);
-                double lon2_rad = vd.lon2();
-                double lat2_rad = vd.lat2();
-
-                point_geo p;
-                bg::set_from_radian<0>(p, lon2_rad);
-                bg::set_from_radian<1>(p, lat2_rad);
-
-                curve_vincenty.push_back(pcast<point_3d>(p));
-            }
+            recalculate_curve< bg::detail::vincenty_inverse<double> >(p1, p2, curve_vincenty);
 
             //recalculate_azimuth(azi);
             recalculate_azimuth(p1, andoyer_inverse(p1, p2, sph).second);
-        }       
+        }
+
+        if ( enable_andoyer )
+        {
+            recalculate_curve< bg::detail::andoyer_inverse<double> >(p1, p2, curve_andoyer);
+        }
+
+        if ( enable_thomas )
+        {
+            recalculate_curve< bg::detail::thomas_inverse<double> >(p1, p2, curve_thomas);
+        }
+    }
+
+    template <typename Inverse>
+    static inline void recalculate_curve(point_geo const& p1, point_geo const& p2, std::vector<point_3d> & curve)
+    {
+        double f_step = 1.0 / 50;
+        int max_count = 100;
+
+        // calculate the azimuth and distance from p1 to p2
+        Inverse inv(bg::get_as_radian<0>(p1),
+                    bg::get_as_radian<1>(p1),
+                    bg::get_as_radian<0>(p2),
+                    bg::get_as_radian<1>(p2),
+                    sph);
+
+        double azi = inv.azimuth();
+        double dist = inv.distance();
+
+        double lon = bg::get_as_radian<0>(p1);
+        double lat = bg::get_as_radian<1>(p1);
+        for ( int i = 0 ; i <= max_count ; ++i )
+        {
+            Inverse inv(lon,
+                        lat,
+                        bg::get_as_radian<0>(p2),
+                        bg::get_as_radian<1>(p2),
+                        sph);
+
+            // calculate the position of p2 for given d and azimuth
+            bg::detail::vincenty_direct<double> vd(lon,
+                                                   lat,
+                                                   f_step * dist,
+                                                   inv.azimuth(),
+                                                   sph);
+            lon = vd.lon2();
+            lat = vd.lat2();
+
+            {
+                Inverse inv(lon,
+                            lat,
+                            bg::get_as_radian<0>(p2),
+                            bg::get_as_radian<1>(p2),
+                            sph);
+                double azi_curr = inv.azimuth();
+                double ba = bearing(azi, azi_curr);
+                if ( ba > bg::math::pi<double>() / 2 )
+                {
+                    curve.push_back(pcast<point_3d>(p2));
+                    return;
+                }
+                azi = azi_curr;
+            }
+
+            point_geo p;
+            bg::set_from_radian<0>(p, lon);
+            bg::set_from_radian<1>(p, lat);
+
+            curve.push_back(pcast<point_3d>(p));
+        }
     }
 
     point_3d loc_east;
@@ -667,7 +725,9 @@ struct scene_data
                   << "mapping_geocentric: " << flag_str(enable_mapping_geocentric) << '\n'
                   << "mapping_reduced:    " << flag_str(enable_mapping_reduced) << '\n'
                   << "great_ellipse:      " << flag_str(enable_great_ellipse) << '\n'
-                  << "vincenty:           " << flag_str(enable_vincenty) << '\n';
+                  << "vincenty:           " << flag_str(enable_vincenty) << '\n'
+                  << "andoyer:            " << flag_str(enable_andoyer) << '\n'
+                  << "thomas:            " << flag_str(enable_thomas) << '\n';
         std::cout.flush();
     }
 
@@ -686,13 +746,16 @@ struct scene_data
 
     void print_curve_lengths() const
     {
+        std::cout << std::setprecision(8);
         std::cout << "LENGTHS\n"
                   << "experimental:       " << curve_length(curve_experimental) << '\n'
                   << "mapping_geodetic:   " << curve_length(curve_mapped_geodetic) << '\n'
                   << "mapping_geocentric: " << curve_length(curve_mapped_geocentric) << '\n'
                   << "mapping_reduced:    " << curve_length(curve_mapped_reduced) << '\n'
                   << "great_ellipse:      " << curve_length(curve_great_ellipse) << '\n'
-                  << "vincenty:           " << curve_length(curve_vincenty) << '\n';
+                  << "vincenty:           " << curve_length(curve_vincenty) << '\n'
+                  << "andoyer:            " << curve_length(curve_andoyer) << '\n'
+                  << "thomas:             " << curve_length(curve_thomas) << '\n';
         std::cout.flush();
     }
 
@@ -759,13 +822,13 @@ void render_scene()
     draw_point_adv(p1, color(1, 0.5, 0));
     draw_point_adv(p2, color(1, 1, 0));
 
-    glColor3f(1, 1, 1);
-    draw_line(data.p1_s, data.p2_s);
-    draw_line(data.p1_xy, data.p2_xy);
-
     // draw experimental lines
     if ( data.enable_experimental )
     {
+        glColor3f(1, 1, 1);
+        draw_line(data.p1_s, data.p2_s);
+        draw_line(data.p1_xy, data.p2_xy);
+
         size_t count = data.lines_experimental.size();
         double f = 0;
         double f_step = 1.0 / count;
@@ -793,6 +856,10 @@ void render_scene()
 
     if ( data.enable_vincenty ) // gray->white
         draw_curve(data.curve_vincenty, color(0.75, 0.75, 0.75), color(1, 1, 1));
+    if ( data.enable_andoyer ) // magenta
+        draw_curve(data.curve_andoyer, color(0.75, 0, 0.75), color(1, 0, 1));
+    if ( data.enable_thomas ) // cyan
+        draw_curve(data.curve_thomas, color(0, 0.75, 0.75), color(0, 1, 1));
 
     // azimuth
     glColor3f(1, 0, 0);
@@ -887,7 +954,8 @@ void print_help()
               << "3     - geocentric curve on/off" << '\n'
               << "4     - reduced curve on/off" << '\n'
               << "5     - great ellipse curve on/off" << '\n'
-              << "6     - vincenty curve on/off" << '\n';
+              << "6     - vincenty curve on/off" << '\n'
+              << "7     - andoyer curve on/off" << '\n';
     std::cout.flush();
 }
 
@@ -904,16 +972,17 @@ void print_distances_and_azimuths()
     std::pair<double, double> ai_res = andoyer_inverse(p1, p2, sph);
     std::pair<double, double> ai2_res = andoyer_inverse_2nd(p1, p2, sph);
 
+    std::cout << std::setprecision(8);
     std::cout << "DISTANCES\n"
-              << "vincenty:  " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
-              << "andoyer:   " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
-              << "haversine: " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n'
-              << "andoyer1:  " << ai_res.first << '\n'
-              << "andoyer2:  " << ai2_res.first << '\n';
+              << "vincenty:     " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
+              << "andoyer orig: " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
+              << "haversine:    " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n'
+              << "andoyer:      " << ai_res.first << '\n'
+              << "thomas:       " << ai2_res.first << '\n';
     std::cout << "AZIMUTHS\n"
-              << "vincenty:  " << bg::detail::azimuth<double>(p1, p2, sph) << '\n'
-              << "andoyer1:  " << ai_res.second << '\n'
-              << "andoyer2:  " << ai2_res.second << '\n';
+              << "vincenty:     " << bg::detail::azimuth<double>(p1, p2, sph) << '\n'
+              << "andoyer:      " << ai_res.second << '\n'
+              << "thomas:       " << ai2_res.second << '\n';
                   
     std::cout.flush();
 }
@@ -985,6 +1054,14 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
     else if ( key == '6' )
     {
         data.enable_vincenty = !data.enable_vincenty;
+    }
+    else if ( key == '7' )
+    {
+        data.enable_andoyer = !data.enable_andoyer;
+    }
+    else if ( key == '8' )
+    {
+        data.enable_thomas = !data.enable_thomas;
     }
     // moving of the p1
     else if ( key == 'w' )
