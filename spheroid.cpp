@@ -21,8 +21,8 @@ typedef bgm::point<double, 2, bg::cs::spherical_equatorial<bg::degree> > point_s
 typedef bgm::point<double, 3, bg::cs::cartesian> point_3d;
 typedef bg::srs::spheroid<double> spheroid;
 
-double a = 1;
-double b = 0.75;
+double a = 1; //6378137.0;
+double b = 0.75; //6356752.314245;
 spheroid sph(a, b);
 
 double pi = bg::math::pi<double>();
@@ -333,8 +333,10 @@ std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& 
     double lon2 = bg::get_as_radian<0>(p2);
     double lat2 = bg::get_as_radian<1>(p2);
 
-    bg::detail::andoyer_inverse<double> ai(lon1, lat1, lon2, lat2, sph);
-    return std::make_pair(ai.distance(), ai.azimuth());
+    typedef bg::detail::andoyer_inverse<double, true, true> andoyer_t;
+    andoyer_t andoyer;
+    andoyer_t::result_type ai = andoyer.apply(lon1, lat1, lon2, lat2, sph);
+    return std::make_pair(ai.distance, ai.azimuth);
 }
 
 std::pair<double, double> andoyer_inverse_2nd(point_geo const& p1, point_geo const& p2, spheroid const& sph)
@@ -344,8 +346,10 @@ std::pair<double, double> andoyer_inverse_2nd(point_geo const& p1, point_geo con
     double lon2 = bg::get_as_radian<0>(p2);
     double lat2 = bg::get_as_radian<1>(p2);
 
-    bg::detail::thomas_inverse<double> ti(lon1, lat1, lon2, lat2, sph);
-    return std::make_pair(ti.distance(), ti.azimuth());
+    typedef bg::detail::thomas_inverse<double, true, true> thomas_t;
+    thomas_t thomas;
+    thomas_t::result_type ti = thomas.apply(lon1, lat1, lon2, lat2, sph);
+    return std::make_pair(ti.distance, ti.azimuth);
 }
 
 double bearing(double rad1, double rad2)
@@ -560,7 +564,7 @@ struct scene_data
         // vincenty
         if ( enable_vincenty )
         {
-            recalculate_curve< bg::detail::vincenty_inverse<double> >(p1, p2, curve_vincenty);
+            recalculate_curve< bg::detail::vincenty_inverse<double, true, true> >(p1, p2, curve_vincenty);
 
             //recalculate_azimuth(azi);
             recalculate_azimuth(p1, andoyer_inverse(p1, p2, sph).second);
@@ -568,12 +572,12 @@ struct scene_data
 
         if ( enable_andoyer )
         {
-            recalculate_curve< bg::detail::andoyer_inverse<double> >(p1, p2, curve_andoyer);
+            recalculate_curve< bg::detail::andoyer_inverse<double, true, true> >(p1, p2, curve_andoyer);
         }
 
         if ( enable_thomas )
         {
-            recalculate_curve< bg::detail::thomas_inverse<double> >(p1, p2, curve_thomas);
+            recalculate_curve< bg::detail::thomas_inverse<double, true, true> >(p1, p2, curve_thomas);
         }
     }
 
@@ -584,41 +588,49 @@ struct scene_data
         int max_count = 100;
 
         // calculate the azimuth and distance from p1 to p2
-        Inverse inv(bg::get_as_radian<0>(p1),
+        Inverse inverse;
+        typename Inverse::result_type inv = inverse.apply(
+                    bg::get_as_radian<0>(p1),
                     bg::get_as_radian<1>(p1),
                     bg::get_as_radian<0>(p2),
                     bg::get_as_radian<1>(p2),
                     sph);
 
-        double azi = inv.azimuth();
-        double dist = inv.distance();
+        double azi = inv.azimuth;
+        double dist = inv.distance;
 
         double lon = bg::get_as_radian<0>(p1);
         double lat = bg::get_as_radian<1>(p1);
         for ( int i = 0 ; i <= max_count ; ++i )
         {
-            Inverse inv(lon,
+            typename Inverse::result_type inv = inverse.apply(
+                        lon,
                         lat,
                         bg::get_as_radian<0>(p2),
                         bg::get_as_radian<1>(p2),
                         sph);
 
             // calculate the position of p2 for given d and azimuth
-            bg::detail::vincenty_direct<double> vd(lon,
-                                                   lat,
-                                                   f_step * dist,
-                                                   inv.azimuth(),
-                                                   sph);
-            lon = vd.lon2();
-            lat = vd.lat2();
+            typedef bg::detail::vincenty_direct<double> direct_t;
+            direct_t direct;
+            direct_t::result_type vd = direct.apply(
+                        lon,
+                        lat,
+                        f_step * dist,
+                        inv.azimuth,
+                        sph);
+
+            lon = vd.lon2;
+            lat = vd.lat2;
 
             {
-                Inverse inv(lon,
+                typename Inverse::result_type inv = inverse.apply(
+                            lon,
                             lat,
                             bg::get_as_radian<0>(p2),
                             bg::get_as_radian<1>(p2),
                             sph);
-                double azi_curr = inv.azimuth();
+                double azi_curr = inv.azimuth;
                 double ba = bearing(azi, azi_curr);
                 if ( ba > bg::math::pi<double>() / 2 )
                 {
@@ -1104,9 +1116,15 @@ void idle_fun()
 int main(int argc, char **argv)
 {
     //test
-    point_geo pp1(degree(0, 0, 0), degree(20, 0, 0));
-    point_geo pp2(degree(106, 0, 0), degree(45, 0, 0));
-    andoyer_inverse_2nd(pp1, pp2, spheroid());
+    {
+        point_geo p1(degree(0, 0, 0), degree(0, 0, 0));
+        point_geo p2(degree(0, 0, 0), degree(10, 0, 0));
+        std::cout << "TEST DISTANCES\n" << std::setprecision(32)
+                  << "vincenty:     " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
+                  << "andoyer: " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
+                  << "thomas: " << bg::distance(p1, p2, bg::strategy::distance::thomas<spheroid>(sph)) << '\n'
+                  << "haversine:    " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n';
+    }
 
     print_help();
     print_geometry();
