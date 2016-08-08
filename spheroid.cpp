@@ -27,9 +27,14 @@ double a = 1; //6378137.0;
 double b = 0.75; //6356752.314245;
 spheroid sph(a, b);
 
+double f_earth = 1.0 / 298.257223563;
+double b_earth = a - f_earth * a;
+
 double pi = bg::math::pi<double>();
 double d2r = bg::math::d2r<double>();
 double r2d = bg::math::r2d<double>();
+
+double flattening(double a, double b) { return (a - b) / a; }
 
 struct color
 {
@@ -392,6 +397,15 @@ struct scene_data
     point_3d v_azimuth_thomas;
     point_3d v_azimuth_great_ellipse;
 
+    double azimuth_vincenty;
+    double azimuth_andoyer;
+    double azimuth_thomas;
+    double azimuth_great_ellipse;
+    double azimuth_mapping_geodetic;
+    double azimuth_mapping_geocentric;
+    double azimuth_mapping_reduced;
+    double azimuth_experimental;
+
     scene_data()
     {
         method = method_mean_point;
@@ -403,10 +417,21 @@ struct scene_data
         enable_vincenty = true;
         enable_andoyer = true;
         enable_thomas = true;
+
+        clear();
     }
 
     void clear()
     {
+        azimuth_vincenty = 0;
+        azimuth_andoyer = 0;
+        azimuth_thomas = 0;
+        azimuth_great_ellipse = 0;
+        azimuth_mapping_geodetic = 0;
+        azimuth_mapping_geocentric = 0;
+        azimuth_mapping_reduced = 0;
+        azimuth_experimental = 0;
+
         curve_experimental.clear();
         lines_experimental.clear();
         curve_mapped_geodetic.clear();
@@ -587,63 +612,55 @@ struct scene_data
         if (enable_experimental)
         {
             curve_experimental.clear();
-            double azimuth = 0;
-
+            
             if (method == method_mean_point)
-                recalculate_curve< experimental_inverse<double, method_mean_point> >(p1, p2, dist_step, curve_experimental, azimuth);
+                recalculate_curve< experimental_inverse<double, method_mean_point> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
             else if (method == method_interpolate)
-                recalculate_curve< experimental_inverse<double, method_interpolate> >(p1, p2, dist_step, curve_experimental, azimuth);
+                recalculate_curve< experimental_inverse<double, method_interpolate> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
             else if (method == method_nearest)
-                recalculate_curve< experimental_inverse<double, method_nearest> >(p1, p2, dist_step, curve_experimental, azimuth);
+                recalculate_curve< experimental_inverse<double, method_nearest> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
             else if (method == method_interpolate_vertically)
-                recalculate_curve< experimental_inverse<double, method_interpolate_vertically> >(p1, p2, dist_step, curve_experimental, azimuth);
+                recalculate_curve< experimental_inverse<double, method_interpolate_vertically> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
         }
 
         if (enable_mapping_geodetic)
         {
-            double azimuth = 0;
-            recalculate_curve< great_circle_inverse<double, mapping_geodetic> >(p1, p2, dist_step, curve_mapped_geodetic, azimuth);
+            recalculate_curve< great_circle_inverse<double, mapping_geodetic> >(p1, p2, dist_step, curve_mapped_geodetic, azimuth_mapping_geodetic);
         }
 
         if (enable_mapping_geocentric)
         {
-            double azimuth = 0;
-            recalculate_curve< great_circle_inverse<double, mapping_geocentric> >(p1, p2, dist_step, curve_mapped_geocentric, azimuth);
+            recalculate_curve< great_circle_inverse<double, mapping_geocentric> >(p1, p2, dist_step, curve_mapped_geocentric, azimuth_mapping_geocentric);
         }
 
         if (enable_mapping_reduced)
         {
-            double azimuth = 0;
-            recalculate_curve< great_circle_inverse<double, mapping_reduced> >(p1, p2, dist_step, curve_mapped_reduced, azimuth);
+            recalculate_curve< great_circle_inverse<double, mapping_reduced> >(p1, p2, dist_step, curve_mapped_reduced, azimuth_mapping_reduced);
         }
 
         if (enable_great_ellipse)
         {
-            double azimuth = 0;
             //recalculate_great_ellipse(p1, p2, curve_great_ellipse, azimuth);
-            recalculate_curve< great_ellipse_inverse<double> >(p1, p2, dist_step, curve_great_ellipse, azimuth);
-            v_azimuth_great_ellipse = make_v_azimuth(azimuth);
+            recalculate_curve< great_ellipse_inverse<double> >(p1, p2, dist_step, curve_great_ellipse, azimuth_great_ellipse);
+            v_azimuth_great_ellipse = make_v_azimuth(azimuth_great_ellipse);
         }
 
         if ( enable_vincenty )
         {
-            double azimuth = 0;
-            recalculate_curve< bg::formula::vincenty_inverse<double, true, true> >(p1, p2, dist_step, curve_vincenty, azimuth);
-            v_azimuth_vincenty = make_v_azimuth(azimuth);
+            recalculate_curve< bg::formula::vincenty_inverse<double, true, true> >(p1, p2, dist_step, curve_vincenty, azimuth_vincenty);
+            v_azimuth_vincenty = make_v_azimuth(azimuth_vincenty);
         }
 
         if ( enable_andoyer )
         {
-            double azimuth = 0;
-            recalculate_curve< bg::formula::andoyer_inverse<double, true, true> >(p1, p2, dist_step, curve_andoyer, azimuth);
-            v_azimuth_andoyer = make_v_azimuth(azimuth);
+            recalculate_curve< bg::formula::andoyer_inverse<double, true, true> >(p1, p2, dist_step, curve_andoyer, azimuth_andoyer);
+            v_azimuth_andoyer = make_v_azimuth(azimuth_andoyer);
         }
 
         if ( enable_thomas )
         {
-            double azimuth = 0;
-            recalculate_curve< bg::formula::thomas_inverse<double, true, true> >(p1, p2, dist_step, curve_thomas, azimuth);
-            v_azimuth_thomas = make_v_azimuth(azimuth);
+            recalculate_curve< bg::formula::thomas_inverse<double, true, true> >(p1, p2, dist_step, curve_thomas, azimuth_thomas);
+            v_azimuth_thomas = make_v_azimuth(azimuth_thomas);
         }
     }
 
@@ -789,14 +806,24 @@ struct scene_data
         }
     };
 
-    void recalculate_great_ellipse(point_geo const& p1, point_geo const& p2, std::vector<point_3d> & curve, double & azimuth)
+    static void recalculate_great_ellipse(point_geo const& p1, point_geo const& p2, std::vector<point_3d> & curve, double & azimuth)
     {
-        point_3d p1v = ::pcast<point_3d>(p1);
-        point_3d p2v = ::pcast<point_3d>(p2);
-        point_3d n = bg::cross_product(p1v, p2v);
-        point_3d aziv = bg::cross_product(n, p1v);
+        point_3d p1_s = ::pcast<point_3d>(p1);
+        point_3d p2_s = ::pcast<point_3d>(p2);
+        point_3d v_s = p2_s - p1_s;
+
+        point_3d n = bg::cross_product(p1_s, p2_s);
+        point_3d aziv = bg::cross_product(n, p1_s);
         normalize(aziv);
-        azimuth = acos(bg::dot_product(aziv, loc_north));
+
+        point_3d north, east;
+        calculate_north_east(p1, north, east);
+
+        azimuth = acos(bg::dot_product(aziv, north));
+        if (bg::dot_product(aziv, east) < 0.0)
+        {
+            azimuth = -azimuth;
+        }
 
         double f = 0;
         int count = 50;
@@ -830,21 +857,10 @@ struct scene_data
     {
         int max_count = 100;
 
-        // calculate the azimuth and distance from p1 to p2
-        typename Inverse::result_type inv = Inverse::apply(
-                    bg::get_as_radian<0>(p1),
-                    bg::get_as_radian<1>(p1),
-                    bg::get_as_radian<0>(p2),
-                    bg::get_as_radian<1>(p2),
-                    sph);
-
-        double azi = inv.azimuth;
-
-        azimuth = azi;
-
         double lon = bg::get_as_radian<0>(p1);
         double lat = bg::get_as_radian<1>(p1);
-        for ( int i = 0 ; i <= max_count ; ++i )
+        double azi = 0;
+
         {
             typename Inverse::result_type inv = Inverse::apply(
                         lon,
@@ -853,40 +869,46 @@ struct scene_data
                         bg::get_as_radian<1>(p2),
                         sph);
 
+            azimuth = azi = inv.azimuth;
+        }
+
+        for ( int i = 0 ; i <= max_count ; ++i )
+        {
             // calculate the position of p2 for given d and azimuth
             typedef bg::formula::vincenty_direct<double> direct_t;
             direct_t::result_type vd = direct_t::apply(
                         lon,
                         lat,
                         dist_step,
-                        inv.azimuth,
+                        azi,
                         sph);
 
             lon = vd.lon2;
             lat = vd.lat2;
 
+            typename Inverse::result_type inv = Inverse::apply(
+                        lon,
+                        lat,
+                        bg::get_as_radian<0>(p2),
+                        bg::get_as_radian<1>(p2),
+                        sph);
+
+            double ba = bearing(azi, inv.azimuth);
+            if (ba > bg::math::pi<double>() / 2)
             {
-                typename Inverse::result_type inv = Inverse::apply(
-                            lon,
-                            lat,
-                            bg::get_as_radian<0>(p2),
-                            bg::get_as_radian<1>(p2),
-                            sph);
-                double azi_curr = inv.azimuth;
-                double ba = bearing(azi, azi_curr);
-                if ( ba > bg::math::pi<double>() / 2 )
-                {
-                    curve.push_back(pcast<point_3d>(p2));
-                    return;
-                }
-                azi = azi_curr;
+                curve.push_back(pcast<point_3d>(p2));
+                return;
             }
+            else
+            {
+                azi = inv.azimuth;
 
-            point_geo p;
-            bg::set_from_radian<0>(p, lon);
-            bg::set_from_radian<1>(p, lat);
+                point_geo p;
+                bg::set_from_radian<0>(p, lon);
+                bg::set_from_radian<1>(p, lat);
 
-            curve.push_back(pcast<point_3d>(p));
+                curve.push_back(pcast<point_3d>(p));
+            }
         }
     }
 
@@ -1221,7 +1243,7 @@ void print_geometry()
     std::cout << "GEOMETRY\n";
     std::cout << "p1:         (" << bg::get<0>(p1) << ", " << bg::get<1>(p1) << ")\n";
     std::cout << "p2:         (" << bg::get<0>(p2) << ", " << bg::get<1>(p2) << ")\n";
-    std::cout << "flattening: " << (a - b) / a << std::endl;
+    std::cout << "flattening: " << flattening(a, b) << std::endl;
 }
 
 void print_distances_and_azimuths()
@@ -1231,15 +1253,20 @@ void print_distances_and_azimuths()
 
     std::cout << std::setprecision(8);
     std::cout << "DISTANCES\n"
-              << "vincenty:     " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
-              << "andoyer orig: " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
-              << "haversine:    " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n'
-              << "andoyer:      " << ai_res.first << '\n'
-              << "thomas:       " << ti_res.first << '\n';
+              << "vincenty:       " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
+              << "thomas:         " << ti_res.first << '\n'
+              << "andoyer:        " << ai_res.first << '\n'
+              << "haversine:      " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n';
+              
     std::cout << "AZIMUTHS\n"
-              << "vincenty:     " << bg::detail::azimuth<double>(p1, p2, sph) << '\n'
-              << "andoyer:      " << ai_res.second << '\n'
-              << "thomas:       " << ti_res.second << '\n';
+              << "vincenty:       " << bg::detail::azimuth<double>(p1, p2, sph) << '\n'
+              << "thomas:         " << ti_res.second << '\n'
+              << "andoyer:        " << ai_res.second << '\n'
+              << "experimental:   " << data.azimuth_experimental << '\n'
+              << "great ellipse:  " << data.azimuth_great_ellipse << '\n'
+              << "map geocentric: " << data.azimuth_mapping_geocentric << '\n'
+              << "map geodetic:   " << data.azimuth_mapping_geodetic << '\n'
+              << "map reduced:    " << data.azimuth_mapping_reduced << '\n';
                   
     std::cout.flush();
 }
@@ -1272,9 +1299,24 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
     }
     else if ( key == '.')
     {
-        b += b_step;
-        if ( b > 2*a-b_step )
-            b = 2*a-b_step;
+        if (b == b_earth)
+        {
+            b = a;
+        }
+        else
+        {
+            double new_b = b + b_step;
+            if (new_b > 2 * a - b_step)
+                new_b = 2 * a - b_step;
+
+            double f = flattening(a, b);
+            double new_f = flattening(a, new_b);
+            if (f > f_earth && f_earth > new_f)
+                new_b = b_earth;
+
+            b = new_b;
+        }
+
         sph = spheroid(a, b);
     }
     else if ( key == ',' )
