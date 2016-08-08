@@ -2,12 +2,14 @@
 
 #include <boost/geometry.hpp>
 #include <boost/geometry/geometries/register/point.hpp>
-#include <boost/geometry/extensions/arithmetic/cross_product.hpp>
+#include <boost/geometry/arithmetic/cross_product.hpp>
 
-#include <boost/geometry/algorithms/detail/vincenty_direct.hpp>
-#include <boost/geometry/algorithms/detail/vincenty_inverse.hpp>
-#include <boost/geometry/algorithms/detail/andoyer_inverse.hpp>
-#include <boost/geometry/algorithms/detail/thomas_inverse.hpp>
+#include <boost/geometry/formulas/vincenty_direct.hpp>
+#include <boost/geometry/formulas/vincenty_inverse.hpp>
+#include <boost/geometry/formulas/andoyer_inverse.hpp>
+#include <boost/geometry/formulas/thomas_inverse.hpp>
+#include <boost/geometry/formulas/geographic.hpp>
+#include <boost/geometry/formulas/spherical.hpp>
 
 #include <iostream>
 #include <vector>
@@ -26,6 +28,8 @@ double b = 0.75; //6356752.314245;
 spheroid sph(a, b);
 
 double pi = bg::math::pi<double>();
+double d2r = bg::math::d2r<double>();
+double r2d = bg::math::r2d<double>();
 
 struct color
 {
@@ -50,23 +54,14 @@ point_3d operator/(point_3d const& p1, double v) { point_3d res = p1; bg::divide
 
 void convert(point_geo const& p, point_3d & res)
 {
-    double lon = bg::get_as_radian<0>(p);
-    double lat = bg::get_as_radian<1>(p);
-    lat = atan(b/a*tan(lat)); // geodesic lat to geocentric lat
-    double cos_lat = cos(lat);
-    bg::set<0>(res, a * cos_lat * cos(lon));
-    bg::set<1>(res, a * cos_lat * sin(lon));
-    bg::set<2>(res, b * sin(lat));
+    res = bg::formula::geo_to_cart3d<point_3d>(p, sph);
+    bg::multiply_value(res, a);
 }
 
 void convert(point_sph const& p, point_3d & res)
 {
-    double lon = bg::get_as_radian<0>(p);
-    double lat = bg::get_as_radian<1>(p);
-    double cos_lat = cos(lat);
-    bg::set<0>(res, a * cos_lat * cos(lon));
-    bg::set<1>(res, a * cos_lat * sin(lon));
-    bg::set<2>(res, a * sin(lat));
+    res = bg::formula::sph_to_cart3d<point_3d>(p);
+    bg::multiply_value(res, a);
 }
 
 void convert(point_3d const& p, point_sph & res)
@@ -232,9 +227,9 @@ void draw_sphere(double x, double y, double z, double r)
     glPopMatrix();
 }
 
-void draw_point(point_3d const& p)
+void draw_point(point_3d const& p, double r = 0.02)
 {
-    draw_sphere(bg::get<0>(p), bg::get<1>(p), bg::get<2>(p), 0.02);
+    draw_sphere(bg::get<0>(p), bg::get<1>(p), bg::get<2>(p), r);
 }
 
 template <typename P>
@@ -333,22 +328,20 @@ std::pair<double, double> andoyer_inverse(point_geo const& p1, point_geo const& 
     double lon2 = bg::get_as_radian<0>(p2);
     double lat2 = bg::get_as_radian<1>(p2);
 
-    typedef bg::detail::andoyer_inverse<double, true, true> andoyer_t;
-    andoyer_t andoyer;
-    andoyer_t::result_type ai = andoyer.apply(lon1, lat1, lon2, lat2, sph);
+    typedef bg::formula::andoyer_inverse<double, true, true> andoyer_t;
+    andoyer_t::result_type ai = andoyer_t::apply(lon1, lat1, lon2, lat2, sph);
     return std::make_pair(ai.distance, ai.azimuth);
 }
 
-std::pair<double, double> andoyer_inverse_2nd(point_geo const& p1, point_geo const& p2, spheroid const& sph)
+std::pair<double, double> thomas_inverse(point_geo const& p1, point_geo const& p2, spheroid const& sph)
 {
     double lon1 = bg::get_as_radian<0>(p1);
     double lat1 = bg::get_as_radian<1>(p1);
     double lon2 = bg::get_as_radian<0>(p2);
     double lat2 = bg::get_as_radian<1>(p2);
 
-    typedef bg::detail::thomas_inverse<double, true, true> thomas_t;
-    thomas_t thomas;
-    thomas_t::result_type ti = thomas.apply(lon1, lat1, lon2, lat2, sph);
+    typedef bg::formula::thomas_inverse<double, true, true> thomas_t;
+    thomas_t::result_type ti = thomas_t::apply(lon1, lat1, lon2, lat2, sph);
     return std::make_pair(ti.distance, ti.azimuth);
 }
 
@@ -364,7 +357,7 @@ double bearing(double rad1, double rad2)
 
 struct scene_data
 {
-    enum method_type { method_mean_point = 0, method_interpolate, method_interpolate_vertically, method_nearest } method;
+    enum method_type { method_mean_point = 0, method_interpolate, method_nearest, method_interpolate_vertically } method;
     bool enable_experimental;
     bool enable_mapping_geodetic;
     bool enable_mapping_geocentric;
@@ -392,6 +385,13 @@ struct scene_data
     point_3d v_s; // vector between the surface points
     point_3d v_xy; // vector between the XY points
 
+    point_3d loc_east;
+    point_3d loc_north;
+    point_3d v_azimuth_vincenty;
+    point_3d v_azimuth_andoyer;
+    point_3d v_azimuth_thomas;
+    point_3d v_azimuth_great_ellipse;
+
     scene_data()
     {
         method = method_mean_point;
@@ -418,10 +418,37 @@ struct scene_data
         curve_thomas.clear();
     }
 
-    void recalculate(point_geo const& p1, point_geo const& p2)
+    static void calculate_north_east(point_geo const& p, point_3d & north, point_3d & east)
     {
-        clear();
+        point_3d p_s = pcast<point_3d>(p);
 
+        // pole
+        if (bg::math::equals(bg::get<0>(p_s), 0.0)
+            && bg::math::equals(bg::get<1>(p_s), 0.0))
+        {
+            double lon = bg::get_as_radian<0>(p);
+
+            bg::set<0>(north, cos(lon));
+            bg::set<1>(north, sin(lon));
+            bg::set<2>(north, 0);
+
+            bg::set<0>(east, -sin(lon));
+            bg::set<1>(east, cos(lon));
+            bg::set<2>(east, 0);
+        }
+        else
+        {
+            point_3d p_xy = projected_to_xy_geod(p);
+            point_3d v_perp = p_s - p_xy;
+            east = bg::cross_product(point_3d(0, 0, 1), v_perp);
+            normalize(east);
+            north = bg::cross_product(v_perp, east);
+            normalize(north);
+        }
+    }
+
+    void recalculate_loc(point_geo const& p1, point_geo const& p2)
+    {
         // cartesian points
         p1_s = pcast<point_3d>(p1);
         p2_s = pcast<point_3d>(p2);
@@ -430,6 +457,20 @@ struct scene_data
         // cartesian vectors
         v_s = p2_s - p1_s;
         v_xy = p2_xy - p1_xy;
+
+        calculate_north_east(p1, loc_north, loc_east);
+    }
+
+    point_3d make_v_azimuth(double azimuth)
+    {
+        return loc_north * cos(azimuth) + loc_east * sin(azimuth);
+    }
+
+    void recalculate(point_geo const& p1, point_geo const& p2)
+    {
+        clear();
+
+        recalculate_loc(p1, p2);
 
         double f = 0;
         int count = 50;
@@ -522,74 +563,275 @@ struct scene_data
                 curve_experimental.push_back(p_curve);
             }
 
-            // great ellipse
-            if ( enable_great_ellipse )
-            {
-                double dx = bg::get<0>(ps);
-                double dy = bg::get<1>(ps);
-                double dz = bg::get<2>(ps);
-
-                double a_sqr = a*a;
-                double b_sqr = b*b;
-                double param_a = (dx*dx+dy*dy)/a_sqr+dz*dz/b_sqr;
-                double param_c = -1;
-
-                double delta = -4*param_a*param_c;
-                double t = delta >= 0 ?
-                           sqrt(delta) / (2*param_a) :
-                           0.0;
-
-                point_3d p_curve = ps * t;
-
-                curve_great_ellipse.push_back(p_curve);
-            }
-
             // mapped to sphere
-            if ( enable_mapping_geodetic )
+            /*if ( enable_mapping_geodetic )
             {
-                recalculate_mapped(p1, p2, f, curve_mapped_geodetic, mapping_geodetic);
+                push_to_mapped(p1, p2, f, curve_mapped_geodetic, mapping_geodetic);
             }
             
             if ( enable_mapping_geocentric )
             {
-                recalculate_mapped(p1, p2, f, curve_mapped_geocentric, mapping_geocentric);
+                push_to_mapped(p1, p2, f, curve_mapped_geocentric, mapping_geocentric);
             }
 
             if ( enable_mapping_reduced )
             {
-                recalculate_mapped(p1, p2, f, curve_mapped_reduced, mapping_reduced);
-            }
+                push_to_mapped(p1, p2, f, curve_mapped_reduced, mapping_reduced);
+            }*/
         }
 
-        // vincenty
+        double dist_step = bg::formula::vincenty_inverse<double, true, false>::apply(
+            bg::get<0>(p1) * d2r, bg::get<1>(p1) * d2r, bg::get<0>(p2) * d2r, bg::get<1>(p2) * d2r, sph
+        ).distance / 50;
+
+        if (enable_experimental)
+        {
+            curve_experimental.clear();
+            double azimuth = 0;
+
+            if (method == method_mean_point)
+                recalculate_curve< experimental_inverse<double, method_mean_point> >(p1, p2, dist_step, curve_experimental, azimuth);
+            else if (method == method_interpolate)
+                recalculate_curve< experimental_inverse<double, method_interpolate> >(p1, p2, dist_step, curve_experimental, azimuth);
+            else if (method == method_nearest)
+                recalculate_curve< experimental_inverse<double, method_nearest> >(p1, p2, dist_step, curve_experimental, azimuth);
+            else if (method == method_interpolate_vertically)
+                recalculate_curve< experimental_inverse<double, method_interpolate_vertically> >(p1, p2, dist_step, curve_experimental, azimuth);
+        }
+
+        if (enable_mapping_geodetic)
+        {
+            double azimuth = 0;
+            recalculate_curve< great_circle_inverse<double, mapping_geodetic> >(p1, p2, dist_step, curve_mapped_geodetic, azimuth);
+        }
+
+        if (enable_mapping_geocentric)
+        {
+            double azimuth = 0;
+            recalculate_curve< great_circle_inverse<double, mapping_geocentric> >(p1, p2, dist_step, curve_mapped_geocentric, azimuth);
+        }
+
+        if (enable_mapping_reduced)
+        {
+            double azimuth = 0;
+            recalculate_curve< great_circle_inverse<double, mapping_reduced> >(p1, p2, dist_step, curve_mapped_reduced, azimuth);
+        }
+
+        if (enable_great_ellipse)
+        {
+            double azimuth = 0;
+            //recalculate_great_ellipse(p1, p2, curve_great_ellipse, azimuth);
+            recalculate_curve< great_ellipse_inverse<double> >(p1, p2, dist_step, curve_great_ellipse, azimuth);
+            v_azimuth_great_ellipse = make_v_azimuth(azimuth);
+        }
+
         if ( enable_vincenty )
         {
-            recalculate_curve< bg::detail::vincenty_inverse<double, true, true> >(p1, p2, curve_vincenty);
-
-            //recalculate_azimuth(azi);
-            recalculate_azimuth(p1, andoyer_inverse(p1, p2, sph).second);
+            double azimuth = 0;
+            recalculate_curve< bg::formula::vincenty_inverse<double, true, true> >(p1, p2, dist_step, curve_vincenty, azimuth);
+            v_azimuth_vincenty = make_v_azimuth(azimuth);
         }
 
         if ( enable_andoyer )
         {
-            recalculate_curve< bg::detail::andoyer_inverse<double, true, true> >(p1, p2, curve_andoyer);
+            double azimuth = 0;
+            recalculate_curve< bg::formula::andoyer_inverse<double, true, true> >(p1, p2, dist_step, curve_andoyer, azimuth);
+            v_azimuth_andoyer = make_v_azimuth(azimuth);
         }
 
         if ( enable_thomas )
         {
-            recalculate_curve< bg::detail::thomas_inverse<double, true, true> >(p1, p2, curve_thomas);
+            double azimuth = 0;
+            recalculate_curve< bg::formula::thomas_inverse<double, true, true> >(p1, p2, dist_step, curve_thomas, azimuth);
+            v_azimuth_thomas = make_v_azimuth(azimuth);
+        }
+    }
+
+    template<typename T, mapping_type Mapping>
+    struct great_circle_inverse
+    {
+        struct result_type
+        {
+            T azimuth;
+        };
+
+        template <typename Spheroid>
+        static inline result_type apply(T const& lon1, T const& lat1, T const& lon2, T const& lat2, Spheroid const& spheroid)
+        {
+            point_geo p1(lon1 * r2d, lat1 * r2d);
+            point_geo p2(lon2 * r2d, lat2 * r2d);
+
+            point_sph p1_m, p2_m;
+            ::convert(p1, p1_m, Mapping);
+            ::convert(p2, p2_m, Mapping);
+
+            result_type res;
+            res.azimuth = bg::detail::azimuth<T>(p1_m, p2_m);
+            return res;
+        }
+    };
+
+    template <typename T>
+    struct great_ellipse_inverse
+    {
+        struct result_type
+        {
+            T azimuth;
+        };
+
+        template <typename Spheroid>
+        static inline result_type apply(T const& lon1, T const& lat1, T const& lon2, T const& lat2, Spheroid const& spheroid)
+        {
+            point_geo p1(lon1 * r2d, lat1 * r2d);
+            point_geo p2(lon2 * r2d, lat2 * r2d);
+
+            point_3d p1v = ::pcast<point_3d>(p1);
+            point_3d p2v = ::pcast<point_3d>(p2);
+            point_3d n = bg::cross_product(p1v, p2v);
+            point_3d aziv = bg::cross_product(n, p1v);
+            normalize(aziv);
+
+            point_3d north;
+            point_3d east;
+            calculate_north_east(p1, north, east);
+            
+            result_type res;
+            res.azimuth = acos(bg::dot_product(aziv, north));            
+            if (bg::dot_product(aziv, east) < 0.0)
+            {
+                res.azimuth = -res.azimuth;
+            }
+
+            return res;
+        }
+    };
+
+    template <typename T, method_type Method>
+    struct experimental_inverse
+    {
+        struct result_type
+        {
+            T azimuth;
+        };
+
+        template <typename Spheroid>
+        static inline result_type apply(T const& lon1, T const& lat1, T const& lon2, T const& lat2, Spheroid const& spheroid)
+        {
+            point_geo p1(lon1 * r2d, lat1 * r2d);
+            point_geo p2(lon2 * r2d, lat2 * r2d);
+
+            point_3d p1_s = ::pcast<point_3d>(p1);
+            point_3d p2_s = ::pcast<point_3d>(p2);
+            point_3d p1_xy = projected_to_xy_geod(p1);
+            point_3d p2_xy = projected_to_xy_geod(p2);
+
+            //point_3d v12 = p2v - p1v;
+            point_3d v12_xy = p2_xy - p1_xy;
+
+            // method_mean_point
+            point_3d origin_xy;
+            
+            if (Method == method_mean_point)
+            {
+                origin_xy = p1_xy + v12_xy * 0.5;
+            }
+            else if (Method == method_interpolate)
+            {
+                origin_xy = p1_xy;
+            }
+            else if (Method == method_nearest)
+            {
+                double l_sqr = bg::dot_product(v12_xy, v12_xy);
+                if (!bg::math::equals(l_sqr, 0))
+                {
+                    double nt = -bg::dot_product(p1_xy - p1_s, p2_xy - p1_xy) / l_sqr;
+                    origin_xy = p1_xy + v12_xy * nt;
+                }
+                else
+                {
+                    origin_xy = point_3d(0, 0, 0);
+                }
+            }
+            else if (Method == method_interpolate_vertically)
+            {
+                point_3d v1 = p1_xy - p1_s;
+                //point_3d v2 = p2_xy - p2_s;
+                // 0=ox+dx*t
+                // 0=yx+dy*t
+                // z=oz+dz*t
+                double t1 = -bg::get<0>(p1_s) / bg::get<0>(v1);
+                //double t2 = -bg::get<0>(p2_s) / bg::get<0>(v2);
+                point_3d p1_v = p1_s + v1 * t1;
+                //point_3d p2_v = p2_s + v2 * t2;
+
+                origin_xy = p1_v;
+            }
+
+            point_3d op1 = p1_s - origin_xy;
+            point_3d op2 = p2_s - origin_xy;
+
+            point_3d n = bg::cross_product(op1, op2);
+            point_3d aziv = bg::cross_product(n, op1);
+            normalize(aziv);
+
+            point_3d north;
+            point_3d east;
+            calculate_north_east(p1, north, east);
+
+            result_type res;
+            res.azimuth = acos(bg::dot_product(aziv, north));
+            if (bg::dot_product(aziv, east) < 0.0)
+            {
+                res.azimuth = -res.azimuth;
+            }
+
+            return res;
+        }
+    };
+
+    void recalculate_great_ellipse(point_geo const& p1, point_geo const& p2, std::vector<point_3d> & curve, double & azimuth)
+    {
+        point_3d p1v = ::pcast<point_3d>(p1);
+        point_3d p2v = ::pcast<point_3d>(p2);
+        point_3d n = bg::cross_product(p1v, p2v);
+        point_3d aziv = bg::cross_product(n, p1v);
+        normalize(aziv);
+        azimuth = acos(bg::dot_product(aziv, loc_north));
+
+        double f = 0;
+        int count = 50;
+        double f_step = 1.0 / count;
+        for (int i = 0; i <= count; ++i, f += f_step)
+        {
+            point_3d ps = p1_s + v_s * f;
+
+            double dx = bg::get<0>(ps);
+            double dy = bg::get<1>(ps);
+            double dz = bg::get<2>(ps);
+
+            double a_sqr = a*a;
+            double b_sqr = b*b;
+            double param_a = (dx*dx+dy*dy)/a_sqr+dz*dz/b_sqr;
+            double param_c = -1;
+
+            double delta = -4*param_a*param_c;
+            double t = delta >= 0 ?
+                        sqrt(delta) / (2*param_a) :
+                        0.0;
+
+            point_3d p_curve = ps * t;
+
+            curve.push_back(p_curve);
         }
     }
 
     template <typename Inverse>
-    static inline void recalculate_curve(point_geo const& p1, point_geo const& p2, std::vector<point_3d> & curve)
+    static inline void recalculate_curve(point_geo const& p1, point_geo const& p2, double dist_step, std::vector<point_3d> & curve, double & azimuth)
     {
-        double f_step = 1.0 / 50;
         int max_count = 100;
 
         // calculate the azimuth and distance from p1 to p2
-        Inverse inverse;
-        typename Inverse::result_type inv = inverse.apply(
+        typename Inverse::result_type inv = Inverse::apply(
                     bg::get_as_radian<0>(p1),
                     bg::get_as_radian<1>(p1),
                     bg::get_as_radian<0>(p2),
@@ -597,13 +839,14 @@ struct scene_data
                     sph);
 
         double azi = inv.azimuth;
-        double dist = inv.distance;
+
+        azimuth = azi;
 
         double lon = bg::get_as_radian<0>(p1);
         double lat = bg::get_as_radian<1>(p1);
         for ( int i = 0 ; i <= max_count ; ++i )
         {
-            typename Inverse::result_type inv = inverse.apply(
+            typename Inverse::result_type inv = Inverse::apply(
                         lon,
                         lat,
                         bg::get_as_radian<0>(p2),
@@ -611,12 +854,11 @@ struct scene_data
                         sph);
 
             // calculate the position of p2 for given d and azimuth
-            typedef bg::detail::vincenty_direct<double> direct_t;
-            direct_t direct;
-            direct_t::result_type vd = direct.apply(
+            typedef bg::formula::vincenty_direct<double> direct_t;
+            direct_t::result_type vd = direct_t::apply(
                         lon,
                         lat,
-                        f_step * dist,
+                        dist_step,
                         inv.azimuth,
                         sph);
 
@@ -624,7 +866,7 @@ struct scene_data
             lat = vd.lat2;
 
             {
-                typename Inverse::result_type inv = inverse.apply(
+                typename Inverse::result_type inv = Inverse::apply(
                             lon,
                             lat,
                             bg::get_as_radian<0>(p2),
@@ -648,41 +890,11 @@ struct scene_data
         }
     }
 
-    point_3d loc_east;
-    point_3d loc_north;
-    point_3d v_azimuth;
-
-    void recalculate_azimuth(point_geo const& p1, double azimuth)
-    {
-        if ( bg::math::equals(bg::get<0>(p1_s), 0.0)
-          && bg::math::equals(bg::get<1>(p1_s), 0.0) )
-        {
-            double lon = bg::get_as_radian<0>(p1);
-
-            bg::set<0>(loc_north, cos(lon));
-            bg::set<1>(loc_north, sin(lon));
-            bg::set<2>(loc_north, 0);
-
-            bg::set<0>(loc_east, -sin(lon));
-            bg::set<1>(loc_east, cos(lon));
-            bg::set<2>(loc_east, 0);
-        }
-        else
-        {
-            point_3d v1_perp = p1_s - p1_xy;
-            loc_east = bg::cross_product(point_3d(0, 0, 1), v1_perp);
-            normalize(loc_east);
-            loc_north = bg::cross_product(v1_perp, loc_east);
-            normalize(loc_north);
-        }
-        v_azimuth = loc_north * cos(azimuth) + loc_east * sin(azimuth);
-    }
-
-    void recalculate_mapped(point_geo const& p1,
-                            point_geo const& p2,
-                            double const& f,
-                            std::vector<point_3d> & curve,
-                            mapping_type mapping)
+    void push_to_mapped(point_geo const& p1,
+                        point_geo const& p2,
+                        double const& f,
+                        std::vector<point_3d> & curve,
+                        mapping_type mapping)
     {
         // geographic mapped to spherical
         point_sph p1_m, p2_m;
@@ -805,6 +1017,10 @@ void draw_curve(std::vector<point_3d> const& curve, color const& color_first, co
         color col = color_first + (color_last - color_first) * f;
         glColor3f(col.r, col.g, col.b);
         draw_line(curve[i-1], curve[i]);
+        
+        if (i == 1)
+            draw_point(curve[0], 0.005);
+        draw_point(curve[i], 0.005);
     }
 }
 
@@ -828,6 +1044,11 @@ void render_scene()
     glLineWidth(1);
 
     draw_model();
+
+    glColor3f(1, 0.5, 0);
+    draw_parallel(bg::get<1>(p1) * d2r);
+    glColor3f(1, 1, 0);
+    draw_parallel(bg::get<1>(p2) * d2r);
 
     glLineWidth(2);
 
@@ -858,29 +1079,53 @@ void render_scene()
 
     if ( data.enable_mapping_geodetic ) // red
         draw_curve(data.curve_mapped_geodetic, color(0.5, 0, 0), color(1, 0, 0));
-    if ( data.enable_mapping_geocentric ) // green
-        draw_curve(data.curve_mapped_geocentric, color(0, 0.5, 0), color(0, 1, 0));
+    if ( data.enable_mapping_geocentric ) // violet
+        draw_curve(data.curve_mapped_geocentric, color(0.25, 0, 0.5), color(0.5, 0, 1));
     if ( data.enable_mapping_reduced ) // blue
         draw_curve(data.curve_mapped_reduced, color(0, 0.25, 0.5), color(0, 0.5, 1));
 
-    if ( data.enable_great_ellipse ) // pink
-        draw_curve(data.curve_great_ellipse, color(0.5, 0, 0.5), color(1, 0, 1));
+    if ( data.enable_great_ellipse ) // green
+    {
+        draw_curve(data.curve_great_ellipse, color(0, 0.5, 0), color(0, 1, 0));
+        glColor3f(0, 0.5, 0);
+        draw_line(data.p1_s, data.p1_s + data.v_azimuth_great_ellipse*0.3);
+        /*
+        size_t count = data.curve_great_ellipse.size();
+        double f = 0;
+        double f_step = 1.0 / count;
+        for (size_t i = 0; i < count; ++i, f += f_step)
+        {
+            glColor3f(0, 0.5 + i * 0.5 / count, 0);
+            draw_line(point_3d(0, 0, 0), data.curve_great_ellipse[i]);
+        }
+        */
+    }
 
-    if ( data.enable_vincenty ) // gray->white
+    if (data.enable_vincenty) // gray->white
+    {
         draw_curve(data.curve_vincenty, color(0.75, 0.75, 0.75), color(1, 1, 1));
-    if ( data.enable_andoyer ) // magenta
+        glColor3f(0.75, 0.75, 0.75);
+        draw_line(data.p1_s, data.p1_s + data.v_azimuth_vincenty*0.3);
+    }
+    if (data.enable_andoyer) // magenta
+    {
         draw_curve(data.curve_andoyer, color(0.75, 0, 0.75), color(1, 0, 1));
-    if ( data.enable_thomas ) // cyan
+        glColor3f(0.75, 0, 0.75);
+        draw_line(data.p1_s, data.p1_s + data.v_azimuth_andoyer*0.3);
+    }
+    if (data.enable_thomas) // cyan
+    {
         draw_curve(data.curve_thomas, color(0, 0.75, 0.75), color(0, 1, 1));
+        glColor3f(0, 0.75, 0.75);
+        draw_line(data.p1_s, data.p1_s + data.v_azimuth_thomas*0.3);
+    }
 
-    // azimuth
+    // loc
     glColor3f(1, 0, 0);
     draw_line(data.p1_s, data.p1_s + data.loc_north*0.2);
     glColor3f(0, 1, 0);
     draw_line(data.p1_s, data.p1_s + data.loc_east*0.2);
-    glColor3f(1, 1, 1);
-    draw_line(data.p1_s, data.p1_s + data.v_azimuth*0.3);
-
+    
     glPopMatrix();
     glFlush();
 }
@@ -982,7 +1227,7 @@ void print_geometry()
 void print_distances_and_azimuths()
 {
     std::pair<double, double> ai_res = andoyer_inverse(p1, p2, sph);
-    std::pair<double, double> ai2_res = andoyer_inverse_2nd(p1, p2, sph);
+    std::pair<double, double> ti_res = thomas_inverse(p1, p2, sph);
 
     std::cout << std::setprecision(8);
     std::cout << "DISTANCES\n"
@@ -990,11 +1235,11 @@ void print_distances_and_azimuths()
               << "andoyer orig: " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
               << "haversine:    " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n'
               << "andoyer:      " << ai_res.first << '\n'
-              << "thomas:       " << ai2_res.first << '\n';
+              << "thomas:       " << ti_res.first << '\n';
     std::cout << "AZIMUTHS\n"
               << "vincenty:     " << bg::detail::azimuth<double>(p1, p2, sph) << '\n'
               << "andoyer:      " << ai_res.second << '\n'
-              << "thomas:       " << ai2_res.second << '\n';
+              << "thomas:       " << ti_res.second << '\n';
                   
     std::cout.flush();
 }

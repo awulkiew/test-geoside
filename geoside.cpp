@@ -14,6 +14,10 @@
 namespace bg = boost::geometry;
 namespace bgm = bg::model;
 namespace bgd = bg::detail;
+namespace bgf = bg::formula;
+
+double const d2r = bg::math::d2r<double>();
+double const r2d = bg::math::r2d<double>();
 
 template <typename T>
 void normalize(T & a)
@@ -48,9 +52,12 @@ double b = 1 - 1.0/300;
 bg::srs::spheroid<double> spheroid(a, b);
 
 bg::strategy::distance::vincenty<bg::srs::spheroid<double> > vincenty(spheroid);
+bg::strategy::distance::thomas<bg::srs::spheroid<double> > thomas(spheroid);
 bg::strategy::distance::andoyer<bg::srs::spheroid<double> > andoyer(spheroid);
 bg::strategy::distance::haversine<double> haversine_mean((2*a+b)/3);
 bg::strategy::distance::haversine<double> haversine_max(a);
+
+typedef bgf::vincenty_inverse<double, true, true, true> vincenty_inv;
 
 double simplify_distance = 0.066;
 
@@ -65,29 +72,31 @@ void fill_points()
     typedef bgm::point<double, 2, bg::cs::spherical_equatorial<bg::degree> > sph_point;
     typedef bgm::point<double, 2, bg::cs::cartesian> car_point;
 
-    bgd::vincenty_inverse<double> vi(lon_s1 * bg::math::d2r,
-                                     lat_s1 * bg::math::d2r,
-                                     lon_s2 * bg::math::d2r,
-                                     lat_s2 * bg::math::d2r,
-                                     spheroid);
-    double fwd = vi.azimuth12();
+    bgf::result_inverse<double>
+        vi = vincenty_inv::apply(lon_s1 * d2r,
+                                 lat_s1 * d2r,
+                                 lon_s2 * d2r,
+                                 lat_s2 * d2r,
+                                 spheroid);
+    double fwd = vi.azimuth;
     normalize(fwd);
-    double bck = vi.azimuth21();
+    double bck = vi.reverse_azimuth;
     normalize(bck);
 
     for ( double y = lat_min ; y <= lat_max ; y += step )
     {
         for ( double x = lon_min ; x <= lon_max ; x += step )    
         {
-            bgd::vincenty_inverse<double> vi2(lon_s1 * bg::math::d2r,
-                                              lat_s1 * bg::math::d2r,
-                                              x * bg::math::d2r,
-                                              y * bg::math::d2r,
-                                              spheroid);
+            bgf::result_inverse<double>
+                vi2 = vincenty_inv::apply(lon_s1 * d2r,
+                                          lat_s1 * d2r,
+                                          x * d2r,
+                                          y * d2r,
+                                          spheroid);
 
-            double fwd2 = vi2.azimuth12();
+            double fwd2 = vi2.azimuth;
             normalize(fwd2);
-            double bck2 = vi2.azimuth21();
+            double bck2 = vi2.reverse_azimuth;
             normalize(bck2);
 
             boost::array<int, 4> ss;
@@ -307,10 +316,12 @@ void measure_paths()
                                       haversine_max);
     }
 
-    std::cout << "(V) - vincenty, (A) - andoyer, (H) - haversine (mean radius), (M) - haversine (max radius)" << std::endl;
+    std::cout << "(V) - vincenty, (T) - thomas, (A) - andoyer, (H) - haversine (mean radius), (M) - haversine (max radius)" << std::endl;
 
     std::cout << "distance (V) = " << std::setprecision(32)
               << bg::distance(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), vincenty) << std::endl;
+    std::cout << "distance (T) = " << std::setprecision(32)
+              << bg::distance(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), thomas) << std::endl;
     std::cout << "distance (A) = " << std::setprecision(32)
               << bg::distance(geo_point(lon_s1, lat_s1), geo_point(lon_s2, lat_s2), andoyer) << std::endl;
     std::cout << "distance (H) = " << std::setprecision(32)
