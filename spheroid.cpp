@@ -148,7 +148,7 @@ point_geo projected_to_equator(point_geo const& p)
     return res;
 }
 
-point_3d projected_to_xy(point_geo const& p)
+point_3d projected_to_xy_vert(point_geo const& p)
 {
     point_3d res;
     ::convert(p, res);
@@ -158,23 +158,20 @@ point_3d projected_to_xy(point_geo const& p)
 
 point_3d projected_to_xy_geod(point_geo const& p)
 {
-    double r = 0;
-    double lon = bg::get_as_radian<0>(p);
-    double lat = bg::get_as_radian<1>(p);
-
     point_3d p3d;
     ::convert(p, p3d);
 
-    // lat == 0
-    if ( bg::math::equals(bg::get<2>(p3d), 0) )
-        r = bg::get_radius<0>(sph);
-    // |lat| == pi/2
-    else if ( bg::math::equals(bg::get<0>(p3d), 0) && bg::math::equals(bg::get<1>(p3d), 0) )
-        r = 0;
-    // sqrt(xx+yy) - |z|/tan(lat)
-    else
-        r = bg::math::sqrt(bg::get<0>(p3d) * bg::get<0>(p3d) + bg::get<1>(p3d) * bg::get<1>(p3d))
-            - bg::math::abs(bg::get<2>(p3d) / tan(lat));
+    // l_xy = sqrt(x^2 + y^2)
+    // lat = atan2(z, (1 - e^2) * l_xy);
+    // r = l_xy - |z / tan(lat)|
+    // |z / tan(lat)| = (1 - e^2) * l_xy
+    // r = e^2 * l_xy
+
+    double l_xy = bg::math::sqrt(bg::math::sqr(bg::get<0>(p3d)) + bg::math::sqr(bg::get<1>(p3d)));
+    double e_sqr = bg::formula::eccentricity_sqr<double>(sph);
+    double r = e_sqr * l_xy;
+    
+    double lon = bg::get_as_radian<0>(p);
 
     point_3d res;
     bg::set<0>(res, r * cos(lon));
@@ -232,7 +229,7 @@ void draw_sphere(double x, double y, double z, double r)
     glPopMatrix();
 }
 
-void draw_point(point_3d const& p, double r = 0.02)
+void draw_point(point_3d const& p, double r = 0.01)
 {
     draw_sphere(bg::get<0>(p), bg::get<1>(p), bg::get<2>(p), r);
 }
@@ -300,7 +297,7 @@ void draw_model()
 
 void draw_point_adv(point_geo const& p, color const& c)
 {
-    point_3d p_xy = projected_to_xy(p);
+    point_3d p_xy = projected_to_xy_vert(p);
     point_3d p_xy_geod = projected_to_xy_geod(p);
 
     glColor4f(c.r, c.g, c.b, c.a);
@@ -445,7 +442,12 @@ struct scene_data
 
     static void calculate_north_east(point_geo const& p, point_3d & north, point_3d & east)
     {
-        point_3d p_s = pcast<point_3d>(p);
+        point_3d p_s;
+        bg::formula::geo_to_cart3d(p, p_s, north, east, sph);
+
+        return;
+
+        p_s = pcast<point_3d>(p);
 
         // pole
         if (bg::math::equals(bg::get<0>(p_s), 0.0)
@@ -702,15 +704,13 @@ struct scene_data
             point_geo p1(lon1 * r2d, lat1 * r2d);
             point_geo p2(lon2 * r2d, lat2 * r2d);
 
-            point_3d p1v = ::pcast<point_3d>(p1);
-            point_3d p2v = ::pcast<point_3d>(p2);
-            point_3d n = bg::cross_product(p1v, p2v);
-            point_3d aziv = bg::cross_product(n, p1v);
-            normalize(aziv);
+            point_3d p1_s, north, east;
+            bg::formula::geo_to_cart3d(p1, p1_s, north, east, sph);
+            point_3d p2_s = bg::formula::geo_to_cart3d<point_3d>(p2, sph);
 
-            point_3d north;
-            point_3d east;
-            calculate_north_east(p1, north, east);
+            point_3d n = bg::cross_product(p1_s, p2_s);
+            point_3d aziv = bg::cross_product(n, p1_s);
+            normalize(aziv);
             
             result_type res;
             res.azimuth = acos(bg::dot_product(aziv, north));            
@@ -737,7 +737,9 @@ struct scene_data
             point_geo p1(lon1 * r2d, lat1 * r2d);
             point_geo p2(lon2 * r2d, lat2 * r2d);
 
-            point_3d p1_s = ::pcast<point_3d>(p1);
+            point_3d p1_s, north, east;
+            bg::formula::geo_to_cart3d(p1, p1_s, north, east, sph);
+            
             point_3d p2_s = ::pcast<point_3d>(p2);
             point_3d p1_xy = projected_to_xy_geod(p1);
             point_3d p2_xy = projected_to_xy_geod(p2);
@@ -745,9 +747,8 @@ struct scene_data
             //point_3d v12 = p2v - p1v;
             point_3d v12_xy = p2_xy - p1_xy;
 
-            // method_mean_point
-            point_3d origin_xy;
-            
+            point_3d origin_xy(0, 0, 0);
+
             if (Method == method_mean_point)
             {
                 origin_xy = p1_xy + v12_xy * 0.5;
@@ -790,11 +791,7 @@ struct scene_data
             point_3d n = bg::cross_product(op1, op2);
             point_3d aziv = bg::cross_product(n, op1);
             normalize(aziv);
-
-            point_3d north;
-            point_3d east;
-            calculate_north_east(p1, north, east);
-
+            
             result_type res;
             res.azimuth = acos(bg::dot_product(aziv, north));
             if (bg::dot_product(aziv, east) < 0.0)
@@ -992,16 +989,16 @@ struct scene_data
 
     void print_curve_lengths() const
     {
-        std::cout << std::setprecision(8);
+        std::cout << std::setprecision(16);
         std::cout << "LENGTHS\n"
+                  << "vincenty:           " << curve_length(curve_vincenty) << '\n'
+                  << "thomas:             " << curve_length(curve_thomas) << '\n'
+                  << "andoyer:            " << curve_length(curve_andoyer) << '\n'
                   << "experimental:       " << curve_length(curve_experimental) << '\n'
+                  << "great_ellipse:      " << curve_length(curve_great_ellipse) << '\n'
                   << "mapping_geodetic:   " << curve_length(curve_mapped_geodetic) << '\n'
                   << "mapping_geocentric: " << curve_length(curve_mapped_geocentric) << '\n'
-                  << "mapping_reduced:    " << curve_length(curve_mapped_reduced) << '\n'
-                  << "great_ellipse:      " << curve_length(curve_great_ellipse) << '\n'
-                  << "vincenty:           " << curve_length(curve_vincenty) << '\n'
-                  << "andoyer:            " << curve_length(curve_andoyer) << '\n'
-                  << "thomas:             " << curve_length(curve_thomas) << '\n';
+                  << "mapping_reduced:    " << curve_length(curve_mapped_reduced) << '\n';
         std::cout.flush();
     }
 
@@ -1046,7 +1043,7 @@ void draw_curve(std::vector<point_3d> const& curve, color const& color_first, co
     }
 }
 
-point_geo p1(-60, -60);
+point_geo p1(-60, 0);
 point_geo p2(60, 60);
 
 float yaw = 0;
@@ -1080,10 +1077,11 @@ void render_scene()
     // draw experimental lines
     if ( data.enable_experimental )
     {
+        /*
         glColor3f(1, 1, 1);
         draw_line(data.p1_s, data.p2_s);
         draw_line(data.p1_xy, data.p2_xy);
-
+        
         size_t count = data.lines_experimental.size();
         double f = 0;
         double f_step = 1.0 / count;
@@ -1091,7 +1089,7 @@ void render_scene()
         {
             glColor3f(1, 0.5+0.5*f, 0); // orange -> yellow
             draw_line(data.lines_experimental[i].first, data.lines_experimental[i].second);
-        }
+        }*/
     }
 
     glLineWidth(3);
@@ -1240,6 +1238,8 @@ void print_help()
 
 void print_geometry()
 {
+    std::cout << std::setprecision(16);
+
     std::cout << "GEOMETRY\n";
     std::cout << "p1:         (" << bg::get<0>(p1) << ", " << bg::get<1>(p1) << ")\n";
     std::cout << "p2:         (" << bg::get<0>(p2) << ", " << bg::get<1>(p2) << ")\n";
@@ -1251,7 +1251,7 @@ void print_distances_and_azimuths()
     std::pair<double, double> ai_res = andoyer_inverse(p1, p2, sph);
     std::pair<double, double> ti_res = thomas_inverse(p1, p2, sph);
 
-    std::cout << std::setprecision(8);
+    std::cout << std::setprecision(16);
     std::cout << "DISTANCES\n"
               << "vincenty:       " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
               << "thomas:         " << ti_res.first << '\n'
@@ -1406,7 +1406,7 @@ int main(int argc, char **argv)
     {
         point_geo p1(degree(0, 0, 0), degree(0, 0, 0));
         point_geo p2(degree(0, 0, 0), degree(10, 0, 0));
-        std::cout << "TEST DISTANCES\n" << std::setprecision(32)
+        std::cout << "TEST DISTANCES\n" << std::setprecision(16)
                   << "vincenty:     " << bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph)) << '\n'
                   << "andoyer: " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
                   << "thomas: " << bg::distance(p1, p2, bg::strategy::distance::thomas<spheroid>(sph)) << '\n'
