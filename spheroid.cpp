@@ -629,12 +629,7 @@ struct scene_data
             normalize(aziv);
             
             result_type res;
-            res.azimuth = acos(bg::dot_product(aziv, north));            
-            if (bg::dot_product(aziv, east) < 0.0)
-            {
-                res.azimuth = -res.azimuth;
-            }
-
+            res.azimuth = atan2(bg::dot_product(aziv, east), bg::dot_product(aziv, north));
             return res;
         }
     };
@@ -673,44 +668,10 @@ struct scene_data
             normalize(aziv);
             
             result_type res;
-            res.azimuth = acos(bg::dot_product(aziv, north));
-            if (bg::dot_product(aziv, east) < 0.0)
-            {
-                res.azimuth = -res.azimuth;
-            }
-
+            res.azimuth = atan2(bg::dot_product(aziv, east), bg::dot_product(aziv, north));
             return res;
         }
     };
-
-    static void recalculate_great_ellipse(point_geo const& p1, point_geo const& p2, std::vector<point_3d> & curve, double & azimuth)
-    {
-        point_3d p1_s, north, east;
-        bg::formula::geo_to_cart3d(p1, p1_s, north, east, sph);
-        point_3d p2_s = bg::formula::geo_to_cart3d<point_3d>(p2, sph);
-        point_3d v_s = p2_s - p1_s;
-
-        point_3d n = bg::cross_product(p1_s, p2_s);
-        point_3d aziv = bg::cross_product(n, p1_s);
-        normalize(aziv);        
-
-        azimuth = acos(bg::dot_product(aziv, north));
-        if (bg::dot_product(aziv, east) < 0.0)
-        {
-            azimuth = -azimuth;
-        }
-
-        double f = 0;
-        int count = 50;
-        double f_step = 1.0 / count;
-        for (int i = 0; i <= count; ++i, f += f_step)
-        {
-            point_3d ps = p1_s + v_s * f;
-            point_3d p_curve = bg::formula::projected_to_surface(ps, sph);
-
-            curve.push_back(p_curve);
-        }
-    }
 
     template <typename Inverse>
     static inline void fill_navigation_curve(point_geo const& p1, point_geo const& p2, double dist_step, std::vector<point_3d> & curve, double & azimuth)
