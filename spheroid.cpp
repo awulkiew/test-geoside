@@ -160,25 +160,7 @@ point_3d projected_to_xy_geod(point_geo const& p)
 {
     point_3d p3d;
     ::convert(p, p3d);
-
-    // l_xy = sqrt(x^2 + y^2)
-    // lat = atan2(z, (1 - e^2) * l_xy);
-    // r = l_xy - |z / tan(lat)|
-    // |z / tan(lat)| = (1 - e^2) * l_xy
-    // r = e^2 * l_xy
-
-    double l_xy = bg::math::sqrt(bg::math::sqr(bg::get<0>(p3d)) + bg::math::sqr(bg::get<1>(p3d)));
-    double e_sqr = bg::formula::eccentricity_sqr<double>(sph);
-    double r = e_sqr * l_xy;
-    
-    double lon = bg::get_as_radian<0>(p);
-
-    point_3d res;
-    bg::set<0>(res, r * cos(lon));
-    bg::set<1>(res, r * sin(lon));
-    bg::set<2>(res, 0);
-
-    return res;
+    return bg::formula::projected_to_xy(p3d, sph);
 }
 
 void draw_meridian(double lon, double step = pi/32)
@@ -858,6 +840,8 @@ struct scene_data
         double lat = bg::get_as_radian<1>(p1);
         double azi = 0;
 
+        curve.push_back(pcast<point_3d>(p1));
+
         {
             typename Inverse::result_type inv = Inverse::apply(
                         lon,
@@ -1037,9 +1021,9 @@ void draw_curve(std::vector<point_3d> const& curve, color const& color_first, co
         glColor3f(col.r, col.g, col.b);
         draw_line(curve[i-1], curve[i]);
         
-        if (i == 1)
+        /*if (i == 1)
             draw_point(curve[0], 0.005);
-        draw_point(curve[i], 0.005);
+        draw_point(curve[i], 0.005);*/
     }
 }
 
@@ -1107,8 +1091,8 @@ void render_scene()
     if ( data.enable_great_ellipse ) // green
     {
         draw_curve(data.curve_great_ellipse, color(0, 0.5, 0), color(0, 1, 0));
-        glColor3f(0, 0.5, 0);
-        draw_line(data.p1_s, data.p1_s + data.v_azimuth_great_ellipse*0.3);
+        //glColor3f(0, 0.5, 0);
+        //draw_line(data.p1_s, data.p1_s + data.v_azimuth_great_ellipse*0.3);
         /*
         size_t count = data.curve_great_ellipse.size();
         double f = 0;
@@ -1124,20 +1108,20 @@ void render_scene()
     if (data.enable_vincenty) // gray->white
     {
         draw_curve(data.curve_vincenty, color(0.75, 0.75, 0.75), color(1, 1, 1));
-        glColor3f(0.75, 0.75, 0.75);
-        draw_line(data.p1_s, data.p1_s + data.v_azimuth_vincenty*0.3);
+        //glColor3f(0.75, 0.75, 0.75);
+        //draw_line(data.p1_s, data.p1_s + data.v_azimuth_vincenty*0.3);
     }
     if (data.enable_andoyer) // magenta
     {
         draw_curve(data.curve_andoyer, color(0.75, 0, 0.75), color(1, 0, 1));
-        glColor3f(0.75, 0, 0.75);
-        draw_line(data.p1_s, data.p1_s + data.v_azimuth_andoyer*0.3);
+        //glColor3f(0.75, 0, 0.75);
+        //draw_line(data.p1_s, data.p1_s + data.v_azimuth_andoyer*0.3);
     }
     if (data.enable_thomas) // cyan
     {
         draw_curve(data.curve_thomas, color(0, 0.75, 0.75), color(0, 1, 1));
-        glColor3f(0, 0.75, 0.75);
-        draw_line(data.p1_s, data.p1_s + data.v_azimuth_thomas*0.3);
+        //glColor3f(0, 0.75, 0.75);
+        //draw_line(data.p1_s, data.p1_s + data.v_azimuth_thomas*0.3);
     }
 
     // loc
