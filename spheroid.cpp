@@ -7,6 +7,7 @@
 #include <boost/geometry/formulas/vincenty_direct.hpp>
 #include <boost/geometry/formulas/vincenty_inverse.hpp>
 #include <boost/geometry/formulas/andoyer_inverse.hpp>
+#include <boost/geometry/formulas/thomas_direct.hpp>
 #include <boost/geometry/formulas/thomas_inverse.hpp>
 #include <boost/geometry/formulas/geographic.hpp>
 #include <boost/geometry/formulas/spherical.hpp>
@@ -88,6 +89,19 @@ void convert(point_sph const& p, point_geo & res)
     bg::set<1>(res, bg::get<1>(p));
 }
 
+void convert(point_3d const& p, point_3d & res)
+{
+    res = p;
+}
+
+template <typename Res, typename P>
+Res pcast(P const& p)
+{
+    Res res;
+    convert(p, res);
+    return res;
+}
+
 enum mapping_type { mapping_geodetic, mapping_geocentric, mapping_reduced };
 
 void convert(point_geo const& p, point_sph & res, mapping_type mapping)
@@ -126,19 +140,6 @@ void convert(point_sph const& p, point_geo & res, mapping_type mapping)
         else
             bg::set_from_radian<1>(res, atan(a_b * tan(bg::get_as_radian<1>(p))));
     }
-}
-
-void convert(point_3d const& p, point_3d & res)
-{
-    res = p;
-}
-
-template <typename Res, typename P>
-Res pcast(P const& p)
-{
-    Res res;
-    ::convert(p, res);
-    return res;
 }
 
 point_geo projected_to_equator(point_geo const& p)
@@ -341,7 +342,7 @@ double bearing(double rad1, double rad2)
 
 struct scene_data
 {
-    enum method_type { method_mean_point = 0, method_interpolate, method_nearest, method_interpolate_vertically } method;
+    enum mode_type { mode_navigation = 0, mode_segment, mode_intersection } mode;
     bool enable_experimental;
     bool enable_mapping_geodetic;
     bool enable_mapping_geocentric;
@@ -352,7 +353,6 @@ struct scene_data
     bool enable_thomas;
 
     std::vector<point_3d> curve_experimental;
-    std::vector<std::pair<point_3d, point_3d> > lines_experimental;
     std::vector<point_3d> curve_mapped_geodetic;
     std::vector<point_3d> curve_mapped_geocentric;
     std::vector<point_3d> curve_mapped_reduced;
@@ -387,7 +387,7 @@ struct scene_data
 
     scene_data()
     {
-        method = method_mean_point;
+        mode = mode_navigation;
         enable_experimental = true;
         enable_mapping_geodetic = true;
         enable_mapping_geocentric = true;
@@ -412,7 +412,6 @@ struct scene_data
         azimuth_experimental = 0;
 
         curve_experimental.clear();
-        lines_experimental.clear();
         curve_mapped_geodetic.clear();
         curve_mapped_geocentric.clear();
         curve_mapped_reduced.clear();
@@ -422,52 +421,16 @@ struct scene_data
         curve_thomas.clear();
     }
 
-    static void calculate_north_east(point_geo const& p, point_3d & north, point_3d & east)
-    {
-        point_3d p_s;
-        bg::formula::geo_to_cart3d(p, p_s, north, east, sph);
-
-        return;
-
-        p_s = pcast<point_3d>(p);
-
-        // pole
-        if (bg::math::equals(bg::get<0>(p_s), 0.0)
-            && bg::math::equals(bg::get<1>(p_s), 0.0))
-        {
-            double lon = bg::get_as_radian<0>(p);
-
-            bg::set<0>(north, cos(lon));
-            bg::set<1>(north, sin(lon));
-            bg::set<2>(north, 0);
-
-            bg::set<0>(east, -sin(lon));
-            bg::set<1>(east, cos(lon));
-            bg::set<2>(east, 0);
-        }
-        else
-        {
-            point_3d p_xy = projected_to_xy_geod(p);
-            point_3d v_perp = p_s - p_xy;
-            east = bg::cross_product(point_3d(0, 0, 1), v_perp);
-            normalize(east);
-            north = bg::cross_product(v_perp, east);
-            normalize(north);
-        }
-    }
-
     void recalculate_loc(point_geo const& p1, point_geo const& p2)
     {
         // cartesian points
-        p1_s = pcast<point_3d>(p1);
-        p2_s = pcast<point_3d>(p2);
-        p1_xy = projected_to_xy_geod(p1);
-        p2_xy = projected_to_xy_geod(p2);
+        bg::formula::geo_to_cart3d(p1, p1_s, loc_north, loc_east, sph);
+        p2_s = bg::formula::geo_to_cart3d<point_3d>(p2, sph);
+        p1_xy = bg::formula::projected_to_xy(p1_s, sph);
+        p2_xy = bg::formula::projected_to_xy(p2_s, sph);
         // cartesian vectors
         v_s = p2_s - p1_s;
         v_xy = p2_xy - p1_xy;
-
-        calculate_north_east(p1, loc_north, loc_east);
     }
 
     point_3d make_v_azimuth(double azimuth)
@@ -481,170 +444,141 @@ struct scene_data
 
         recalculate_loc(p1, p2);
 
-        double f = 0;
         int count = 50;
         double f_step = 1.0 / count;
-        for ( int i = 0 ; i <= count ; ++i, f += f_step )
-        {
-            point_3d ps = p1_s + v_s * f;
-
-            // experimental method
-            if ( enable_experimental )
-            {
-                point_3d pxy;
-
-                if ( method == method_interpolate )
-                {
-                    pxy = p1_xy + v_xy * f;
-                }
-                else if ( method == method_nearest )
-                {
-                    double l_sqr = bg::dot_product(v_xy, v_xy);
-                    if ( !bg::math::equals(l_sqr, 0) )
-                    {
-                        double nt = -bg::dot_product(p1_xy - ps, p2_xy - p1_xy) / l_sqr;
-                        pxy = p1_xy + v_xy * nt;
-                    }
-                    else
-                    {
-                        pxy = point_3d(0, 0, 0);
-                    }
-                }
-                else if ( method == method_mean_point )
-                {
-                    pxy = p1_xy + v_xy * 0.5;
-                }
-                else if ( method == method_interpolate_vertically )
-                {
-                    point_3d v1 = p1_xy - p1_s;
-                    point_3d v2 = p2_xy - p2_s;
-                    // 0=ox+dx*t
-                    // 0=yx+dy*t
-                    // z=oz+dz*t
-                    double t1 = - bg::get<0>(p1_s) / bg::get<0>(v1);
-                    double t2 = - bg::get<0>(p2_s) / bg::get<0>(v2);
-                    point_3d p1_v = p1_s + v1 * t1;
-                    point_3d p2_v = p2_s + v2 * t2;
-
-                    // for display purposes
-                    p1_xy = p1_v;
-                    p2_xy = p2_v;
-                    v_xy = p2_xy - p1_xy;
-
-                    pxy = p1_xy + v_xy * f;
-                }
-                else
-                {
-                    BOOST_ASSERT(false);
-                }
-
-                // segments between the lines
-                lines_experimental.push_back(std::make_pair(pxy, ps));
-
-                // vectors corresponding to segments
-                point_3d d = ps - pxy;
-
-                // calculate the point of intersection of a ray and spheroid's surface
-                //(x*x+y*y)/(a*a) + z*z/(b*b) = 1
-                // x = o.x + d.x * t
-                // y = o.y + d.y * t
-                // z = o.z + d.z * t        
-                double ox = bg::get<0>(pxy);
-                double oy = bg::get<1>(pxy);
-                double oz = bg::get<2>(pxy);
-                double dx = bg::get<0>(d);
-                double dy = bg::get<1>(d);
-                double dz = bg::get<2>(d);
-
-                double a_sqr = a*a;
-                double b_sqr = b*b;
-                double param_a = (dx*dx+dy*dy)/a_sqr+dz*dz/b_sqr;
-                double param_b = 2*((ox*dx+oy*dy)/a_sqr+oz*dz/b_sqr);
-                double param_c = (ox*ox+oy*oy)/a_sqr+oz*oz/b_sqr-1;
-
-                double delta = param_b*param_b-4*param_a*param_c;
-                double t = delta >= 0 ?
-                           (-param_b+sqrt(delta)) / (2*param_a) :
-                           0.0;
-
-                point_3d p_curve = pxy + d * t;
-
-                curve_experimental.push_back(p_curve);
-            }
-
-            // mapped to sphere
-            /*if ( enable_mapping_geodetic )
-            {
-                push_to_mapped(p1, p2, f, curve_mapped_geodetic, mapping_geodetic);
-            }
-            
-            if ( enable_mapping_geocentric )
-            {
-                push_to_mapped(p1, p2, f, curve_mapped_geocentric, mapping_geocentric);
-            }
-
-            if ( enable_mapping_reduced )
-            {
-                push_to_mapped(p1, p2, f, curve_mapped_reduced, mapping_reduced);
-            }*/
-        }
-
         double dist_step = bg::formula::vincenty_inverse<double, true, false>::apply(
             bg::get<0>(p1) * d2r, bg::get<1>(p1) * d2r, bg::get<0>(p2) * d2r, bg::get<1>(p2) * d2r, sph
-        ).distance / 50;
-
-        if (enable_experimental)
+        ).distance / count;
+        
+        if (mode == mode_navigation)
         {
-            curve_experimental.clear();
-            
-            if (method == method_mean_point)
-                recalculate_curve< experimental_inverse<double, method_mean_point> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
-            else if (method == method_interpolate)
-                recalculate_curve< experimental_inverse<double, method_interpolate> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
-            else if (method == method_nearest)
-                recalculate_curve< experimental_inverse<double, method_nearest> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
-            else if (method == method_interpolate_vertically)
-                recalculate_curve< experimental_inverse<double, method_interpolate_vertically> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
+            if (enable_experimental)
+            {
+                curve_experimental.clear();
+                fill_navigation_curve< experimental_inverse<double> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
+            }
+
+            if (enable_mapping_geodetic)
+            {
+                fill_navigation_curve< great_circle_inverse<double, mapping_geodetic> >(p1, p2, dist_step, curve_mapped_geodetic, azimuth_mapping_geodetic);
+            }
+
+            if (enable_mapping_geocentric)
+            {
+                fill_navigation_curve< great_circle_inverse<double, mapping_geocentric> >(p1, p2, dist_step, curve_mapped_geocentric, azimuth_mapping_geocentric);
+            }
+
+            if (enable_mapping_reduced)
+            {
+                fill_navigation_curve< great_circle_inverse<double, mapping_reduced> >(p1, p2, dist_step, curve_mapped_reduced, azimuth_mapping_reduced);
+            }
+
+            if (enable_great_ellipse)
+            {
+                fill_navigation_curve< great_ellipse_inverse<double> >(p1, p2, dist_step, curve_great_ellipse, azimuth_great_ellipse);
+                v_azimuth_great_ellipse = make_v_azimuth(azimuth_great_ellipse);
+            }
+
+            if (enable_vincenty)
+            {
+                fill_navigation_curve< bg::formula::vincenty_inverse<double, true, true> >(p1, p2, dist_step, curve_vincenty, azimuth_vincenty);
+                v_azimuth_vincenty = make_v_azimuth(azimuth_vincenty);
+            }
+
+            if (enable_andoyer)
+            {
+                fill_navigation_curve< bg::formula::andoyer_inverse<double, true, true> >(p1, p2, dist_step, curve_andoyer, azimuth_andoyer);
+                v_azimuth_andoyer = make_v_azimuth(azimuth_andoyer);
+            }
+
+            if (enable_thomas)
+            {
+                fill_navigation_curve< bg::formula::thomas_inverse<double, true, true> >(p1, p2, dist_step, curve_thomas, azimuth_thomas);
+                v_azimuth_thomas = make_v_azimuth(azimuth_thomas);
+            }
         }
-
-        if (enable_mapping_geodetic)
+        else if (mode == mode_segment)
         {
-            recalculate_curve< great_circle_inverse<double, mapping_geodetic> >(p1, p2, dist_step, curve_mapped_geodetic, azimuth_mapping_geodetic);
-        }
+            double lon1 = bg::get_as_radian<0>(p1);
+            double lat1 = bg::get_as_radian<1>(p1);
+            double lon2 = bg::get_as_radian<0>(p2);
+            double lat2 = bg::get_as_radian<1>(p2);
 
-        if (enable_mapping_geocentric)
-        {
-            recalculate_curve< great_circle_inverse<double, mapping_geocentric> >(p1, p2, dist_step, curve_mapped_geocentric, azimuth_mapping_geocentric);
-        }
+            double azimuth_vincenty = 0;
+            double azimuth_thomas = 0;
 
-        if (enable_mapping_reduced)
-        {
-            recalculate_curve< great_circle_inverse<double, mapping_reduced> >(p1, p2, dist_step, curve_mapped_reduced, azimuth_mapping_reduced);
-        }
+            if (enable_vincenty)
+            {
+                azimuth_vincenty = bg::formula::vincenty_inverse<double, false, true>::apply(
+                                        lon1, lat1, lon2, lat2, sph).azimuth;
+            }
+                
+            if (enable_thomas)
+            {
+                azimuth_thomas = bg::formula::thomas_inverse<double, false, true>::apply(
+                                        lon1, lat1, lon2, lat2, sph).azimuth;
+            }
 
-        if (enable_great_ellipse)
-        {
-            //recalculate_great_ellipse(p1, p2, curve_great_ellipse, azimuth);
-            recalculate_curve< great_ellipse_inverse<double> >(p1, p2, dist_step, curve_great_ellipse, azimuth_great_ellipse);
-            v_azimuth_great_ellipse = make_v_azimuth(azimuth_great_ellipse);
-        }
 
-        if ( enable_vincenty )
-        {
-            recalculate_curve< bg::formula::vincenty_inverse<double, true, true> >(p1, p2, dist_step, curve_vincenty, azimuth_vincenty);
-            v_azimuth_vincenty = make_v_azimuth(azimuth_vincenty);
-        }
+            double f = 0;
+            double d = 0;
+            for (int i = 0; i <= count; ++i, f += f_step, d += dist_step)
+            {
+                point_3d ps = p1_s + v_s * f;
 
-        if ( enable_andoyer )
-        {
-            recalculate_curve< bg::formula::andoyer_inverse<double, true, true> >(p1, p2, dist_step, curve_andoyer, azimuth_andoyer);
-            v_azimuth_andoyer = make_v_azimuth(azimuth_andoyer);
-        }
+                // experimental method
+                if (enable_experimental)
+                {
+                    point_3d o = p1_xy + v_xy * 0.5;
+                    point_3d d = ps - o;
+                    point_3d p_curve = bg::formula::projected_to_surface(o, d, sph);
+                    curve_experimental.push_back(p_curve);
+                }
 
-        if ( enable_thomas )
-        {
-            recalculate_curve< bg::formula::thomas_inverse<double, true, true> >(p1, p2, dist_step, curve_thomas, azimuth_thomas);
-            v_azimuth_thomas = make_v_azimuth(azimuth_thomas);
+                if (enable_great_ellipse)
+                {
+                    point_3d p_curve = bg::formula::projected_to_surface(ps, sph);
+                    curve_great_ellipse.push_back(p_curve);
+                }
+
+                if (enable_vincenty)
+                {
+                    typedef bg::formula::vincenty_direct<double> direct_t;
+                    direct_t::result_type res = direct_t::apply(lon1, lat1, d, azimuth_vincenty, sph);
+                    point_geo p;
+                    bg::set_from_radian<0>(p, res.lon2);
+                    bg::set_from_radian<1>(p, res.lat2);
+                    point_3d p_curve = pcast<point_3d>(p);
+                    curve_vincenty.push_back(p_curve);
+                }
+
+                if (enable_thomas)
+                {
+                    typedef bg::formula::thomas_direct<double> direct_t;
+                    direct_t::result_type res = direct_t::apply(lon1, lat1, d, azimuth_thomas, sph);
+                    point_geo p;
+                    bg::set_from_radian<0>(p, res.lon2);
+                    bg::set_from_radian<1>(p, res.lat2);
+                    point_3d p_curve = pcast<point_3d>(p);
+                    curve_thomas.push_back(p_curve);
+                }
+
+                // mapped to sphere
+                if ( enable_mapping_geodetic )
+                {
+                    push_to_mapped(p1, p2, f, curve_mapped_geodetic, mapping_geodetic);
+                }
+
+                if ( enable_mapping_geocentric )
+                {
+                    push_to_mapped(p1, p2, f, curve_mapped_geocentric, mapping_geocentric);
+                }
+
+                if ( enable_mapping_reduced )
+                {
+                    push_to_mapped(p1, p2, f, curve_mapped_reduced, mapping_reduced);
+                }
+            }
         }
     }
 
@@ -705,7 +639,7 @@ struct scene_data
         }
     };
 
-    template <typename T, method_type Method>
+    template <typename T>
     struct experimental_inverse
     {
         struct result_type
@@ -722,51 +656,15 @@ struct scene_data
             point_3d p1_s, north, east;
             bg::formula::geo_to_cart3d(p1, p1_s, north, east, sph);
             
-            point_3d p2_s = ::pcast<point_3d>(p2);
-            point_3d p1_xy = projected_to_xy_geod(p1);
-            point_3d p2_xy = projected_to_xy_geod(p2);
+            point_3d p2_s = bg::formula::geo_to_cart3d<point_3d>(p2, sph);
+            point_3d p1_xy = bg::formula::projected_to_xy(p1_s, sph);
+            point_3d p2_xy = bg::formula::projected_to_xy(p2_s, sph);
 
             //point_3d v12 = p2v - p1v;
             point_3d v12_xy = p2_xy - p1_xy;
 
-            point_3d origin_xy(0, 0, 0);
-
-            if (Method == method_mean_point)
-            {
-                origin_xy = p1_xy + v12_xy * 0.5;
-            }
-            else if (Method == method_interpolate)
-            {
-                origin_xy = p1_xy;
-            }
-            else if (Method == method_nearest)
-            {
-                double l_sqr = bg::dot_product(v12_xy, v12_xy);
-                if (!bg::math::equals(l_sqr, 0))
-                {
-                    double nt = -bg::dot_product(p1_xy - p1_s, p2_xy - p1_xy) / l_sqr;
-                    origin_xy = p1_xy + v12_xy * nt;
-                }
-                else
-                {
-                    origin_xy = point_3d(0, 0, 0);
-                }
-            }
-            else if (Method == method_interpolate_vertically)
-            {
-                point_3d v1 = p1_xy - p1_s;
-                //point_3d v2 = p2_xy - p2_s;
-                // 0=ox+dx*t
-                // 0=yx+dy*t
-                // z=oz+dz*t
-                double t1 = -bg::get<0>(p1_s) / bg::get<0>(v1);
-                //double t2 = -bg::get<0>(p2_s) / bg::get<0>(v2);
-                point_3d p1_v = p1_s + v1 * t1;
-                //point_3d p2_v = p2_s + v2 * t2;
-
-                origin_xy = p1_v;
-            }
-
+            point_3d origin_xy = p1_xy + v12_xy * 0.5;
+            
             point_3d op1 = p1_s - origin_xy;
             point_3d op2 = p2_s - origin_xy;
 
@@ -787,16 +685,14 @@ struct scene_data
 
     static void recalculate_great_ellipse(point_geo const& p1, point_geo const& p2, std::vector<point_3d> & curve, double & azimuth)
     {
-        point_3d p1_s = ::pcast<point_3d>(p1);
-        point_3d p2_s = ::pcast<point_3d>(p2);
+        point_3d p1_s, north, east;
+        bg::formula::geo_to_cart3d(p1, p1_s, north, east, sph);
+        point_3d p2_s = bg::formula::geo_to_cart3d<point_3d>(p2, sph);
         point_3d v_s = p2_s - p1_s;
 
         point_3d n = bg::cross_product(p1_s, p2_s);
         point_3d aziv = bg::cross_product(n, p1_s);
-        normalize(aziv);
-
-        point_3d north, east;
-        calculate_north_east(p1, north, east);
+        normalize(aziv);        
 
         azimuth = acos(bg::dot_product(aziv, north));
         if (bg::dot_product(aziv, east) < 0.0)
@@ -810,29 +706,14 @@ struct scene_data
         for (int i = 0; i <= count; ++i, f += f_step)
         {
             point_3d ps = p1_s + v_s * f;
-
-            double dx = bg::get<0>(ps);
-            double dy = bg::get<1>(ps);
-            double dz = bg::get<2>(ps);
-
-            double a_sqr = a*a;
-            double b_sqr = b*b;
-            double param_a = (dx*dx+dy*dy)/a_sqr+dz*dz/b_sqr;
-            double param_c = -1;
-
-            double delta = -4*param_a*param_c;
-            double t = delta >= 0 ?
-                        sqrt(delta) / (2*param_a) :
-                        0.0;
-
-            point_3d p_curve = ps * t;
+            point_3d p_curve = bg::formula::projected_to_surface(ps, sph);
 
             curve.push_back(p_curve);
         }
     }
 
     template <typename Inverse>
-    static inline void recalculate_curve(point_geo const& p1, point_geo const& p2, double dist_step, std::vector<point_3d> & curve, double & azimuth)
+    static inline void fill_navigation_curve(point_geo const& p1, point_geo const& p2, double dist_step, std::vector<point_3d> & curve, double & azimuth)
     {
         int max_count = 100;
 
@@ -938,15 +819,15 @@ struct scene_data
         curve.push_back(p_curve_3d);
     }
 
-    void cycle_method()
+    void cycle_mode()
     {
-        method = method_type((method + 1) % 4);
+        mode = mode_type((mode + 1) % 2);
     }
 
     void print_settings() const
     {
         std::cout << "SETTINGS\n"
-                  << "method:             " << method_str() << '\n'
+                  << "mode:               " << mode_str() << '\n'
                   << "experimental:       " << flag_str(enable_experimental) << '\n'
                   << "mapping_geodetic:   " << flag_str(enable_mapping_geodetic) << '\n'
                   << "mapping_geocentric: " << flag_str(enable_mapping_geocentric) << '\n'
@@ -954,7 +835,7 @@ struct scene_data
                   << "great_ellipse:      " << flag_str(enable_great_ellipse) << '\n'
                   << "vincenty:           " << flag_str(enable_vincenty) << '\n'
                   << "andoyer:            " << flag_str(enable_andoyer) << '\n'
-                  << "thomas:            " << flag_str(enable_thomas) << '\n';
+                  << "thomas:             " << flag_str(enable_thomas) << '\n';
         std::cout.flush();
     }
 
@@ -963,12 +844,12 @@ struct scene_data
         return f ? "on" : "off";
     }
 
-    const char * method_str() const
+    const char * mode_str() const
     {
-        return method == method_interpolate ? "interpolate" :
-               method == method_nearest ? "nearest" :
-               method == method_mean_point ? "mean point" :
-               "interpolate vertically";
+        return mode == mode_navigation ? "navigation" :
+               mode == mode_segment ? "segment" :
+               mode == mode_intersection ? "intersection" :
+               "unknown";
     }
 
     void print_curve_lengths() const
@@ -1312,7 +1193,7 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
     }
     else if ( key == 'm' )
     {
-        data.cycle_method();
+        data.cycle_mode();
     }
     else if ( key == '1' )
     {
