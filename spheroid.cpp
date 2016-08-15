@@ -4,6 +4,8 @@
 #include <boost/geometry/geometries/register/point.hpp>
 #include <boost/geometry/arithmetic/cross_product.hpp>
 
+#include <boost/geometry/formulas/gnomonic_intersection.hpp>
+#include <boost/geometry/formulas/sjoberg_intersection.hpp>
 #include <boost/geometry/formulas/vincenty_direct.hpp>
 #include <boost/geometry/formulas/vincenty_inverse.hpp>
 #include <boost/geometry/formulas/andoyer_inverse.hpp>
@@ -233,6 +235,15 @@ void draw_line(point_3d const& p1, point_3d const& p2)
     glEnd();
 }
 
+void draw_triangle(point_3d const& p1, point_3d const& p2, point_3d const& p3)
+{
+    glBegin(GL_TRIANGLES);
+    glVertex3f(bg::get<0>(p1), bg::get<1>(p1), bg::get<2>(p1));
+    glVertex3f(bg::get<0>(p2), bg::get<1>(p2), bg::get<2>(p2));
+    glVertex3f(bg::get<0>(p3), bg::get<1>(p3), bg::get<2>(p3));
+    glEnd();
+}
+
 template <typename P1, typename P2>
 void draw_line(P1 const& p1, P2 const& p2)
 {
@@ -365,16 +376,36 @@ struct scene_data
     point_3d p2_s; // cartesian point on surface
     point_3d p1_xy; // corresponding cartesian point on XY
     point_3d p2_xy; // corresponding cartesian point on XY
-
     point_3d v_s; // vector between the surface points
     point_3d v_xy; // vector between the XY points
 
-    point_3d loc_east;
-    point_3d loc_north;
+    point_3d q1_s; // cartesian point on surface
+    point_3d q2_s; // cartesian point on surface
+    point_3d q1_xy; // corresponding cartesian point on XY
+    point_3d q2_xy; // corresponding cartesian point on XY
+    point_3d w_s; // vector between the surface points
+    point_3d w_xy; // vector between the XY points
+
+    point_3d p_east;
+    point_3d p_north;
+    point_3d q_east;
+    point_3d q_north;
+
     point_3d v_azimuth_vincenty;
     point_3d v_azimuth_andoyer;
     point_3d v_azimuth_thomas;
     point_3d v_azimuth_great_ellipse;
+
+    std::vector<point_3d> curve2_experimental;
+    std::vector<point_3d> curve2_vincenty;
+    
+    point_geo i_experimental;
+    point_geo i_vincenty_gnomonic;
+    point_geo i_vincenty_sjoberg;
+
+    point_3d i_experimental_s;
+    point_3d i_vincenty_gnomonic_s;
+    point_3d i_vincenty_sjoberg_s;
 
     double azimuth_vincenty;
     double azimuth_andoyer;
@@ -419,166 +450,263 @@ struct scene_data
         curve_vincenty.clear();
         curve_andoyer.clear();
         curve_thomas.clear();
+
+        curve2_experimental.clear();
+        curve2_vincenty.clear();
     }
 
-    void recalculate_loc(point_geo const& p1, point_geo const& p2)
+    void recalculate_loc(point_geo const& p1, point_geo const& p2,
+                         point_geo const& q1, point_geo const& q2)
     {
         // cartesian points
-        bg::formula::geo_to_cart3d(p1, p1_s, loc_north, loc_east, sph);
+        bg::formula::geo_to_cart3d(p1, p1_s, p_north, p_east, sph);
         p2_s = bg::formula::geo_to_cart3d<point_3d>(p2, sph);
         p1_xy = bg::formula::projected_to_xy(p1_s, sph);
         p2_xy = bg::formula::projected_to_xy(p2_s, sph);
         // cartesian vectors
         v_s = p2_s - p1_s;
         v_xy = p2_xy - p1_xy;
+
+        if (mode == mode_intersection)
+        {
+            // cartesian points
+            bg::formula::geo_to_cart3d(q1, q1_s, q_north, q_east, sph);
+            q2_s = bg::formula::geo_to_cart3d<point_3d>(q2, sph);
+            q1_xy = bg::formula::projected_to_xy(q1_s, sph);
+            q2_xy = bg::formula::projected_to_xy(q2_s, sph);
+            // cartesian vectors
+            w_s = q2_s - q1_s;
+            w_xy = q2_xy - q1_xy;
+        }
     }
 
-    point_3d make_v_azimuth(double azimuth)
+    point_3d make_p_azimuth(double azimuth)
     {
-        return loc_north * cos(azimuth) + loc_east * sin(azimuth);
+        return p_north * cos(azimuth) + p_east * sin(azimuth);
     }
 
-    void recalculate(point_geo const& p1, point_geo const& p2)
+    void recalculate(point_geo const& p1, point_geo const& p2,
+                     point_geo const& q1, point_geo const& q2)
     {
         clear();
 
-        recalculate_loc(p1, p2);
+        recalculate_loc(p1, p2, q1, q2);
 
         int count = 50;
         double f_step = 1.0 / count;
-        double dist_step = bg::formula::vincenty_inverse<double, true, false>::apply(
-            bg::get<0>(p1) * d2r, bg::get<1>(p1) * d2r, bg::get<0>(p2) * d2r, bg::get<1>(p2) * d2r, sph
-        ).distance / count;
+
+        if (mode == mode_navigation || mode == mode_segment)
+        {
+            double dist_step = bg::formula::vincenty_inverse<double, true, false>::apply(
+                bg::get<0>(p1) * d2r, bg::get<1>(p1) * d2r, bg::get<0>(p2) * d2r, bg::get<1>(p2) * d2r, sph
+            ).distance / count;
         
-        if (mode == mode_navigation)
-        {
-            if (enable_experimental)
+            if (mode == mode_navigation)
             {
-                curve_experimental.clear();
-                fill_navigation_curve< experimental_inverse<double> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
-            }
-
-            if (enable_mapping_geodetic)
-            {
-                fill_navigation_curve< great_circle_inverse<double, mapping_geodetic> >(p1, p2, dist_step, curve_mapped_geodetic, azimuth_mapping_geodetic);
-            }
-
-            if (enable_mapping_geocentric)
-            {
-                fill_navigation_curve< great_circle_inverse<double, mapping_geocentric> >(p1, p2, dist_step, curve_mapped_geocentric, azimuth_mapping_geocentric);
-            }
-
-            if (enable_mapping_reduced)
-            {
-                fill_navigation_curve< great_circle_inverse<double, mapping_reduced> >(p1, p2, dist_step, curve_mapped_reduced, azimuth_mapping_reduced);
-            }
-
-            if (enable_great_ellipse)
-            {
-                fill_navigation_curve< great_ellipse_inverse<double> >(p1, p2, dist_step, curve_great_ellipse, azimuth_great_ellipse);
-                v_azimuth_great_ellipse = make_v_azimuth(azimuth_great_ellipse);
-            }
-
-            if (enable_vincenty)
-            {
-                fill_navigation_curve< bg::formula::vincenty_inverse<double, true, true> >(p1, p2, dist_step, curve_vincenty, azimuth_vincenty);
-                v_azimuth_vincenty = make_v_azimuth(azimuth_vincenty);
-            }
-
-            if (enable_andoyer)
-            {
-                fill_navigation_curve< bg::formula::andoyer_inverse<double, true, true> >(p1, p2, dist_step, curve_andoyer, azimuth_andoyer);
-                v_azimuth_andoyer = make_v_azimuth(azimuth_andoyer);
-            }
-
-            if (enable_thomas)
-            {
-                fill_navigation_curve< bg::formula::thomas_inverse<double, true, true> >(p1, p2, dist_step, curve_thomas, azimuth_thomas);
-                v_azimuth_thomas = make_v_azimuth(azimuth_thomas);
-            }
-        }
-        else if (mode == mode_segment)
-        {
-            double lon1 = bg::get_as_radian<0>(p1);
-            double lat1 = bg::get_as_radian<1>(p1);
-            double lon2 = bg::get_as_radian<0>(p2);
-            double lat2 = bg::get_as_radian<1>(p2);
-
-            double azimuth_vincenty = 0;
-            double azimuth_thomas = 0;
-
-            if (enable_vincenty)
-            {
-                azimuth_vincenty = bg::formula::vincenty_inverse<double, false, true>::apply(
-                                        lon1, lat1, lon2, lat2, sph).azimuth;
-            }
-                
-            if (enable_thomas)
-            {
-                azimuth_thomas = bg::formula::thomas_inverse<double, false, true>::apply(
-                                        lon1, lat1, lon2, lat2, sph).azimuth;
-            }
-
-
-            double f = 0;
-            double d = 0;
-            for (int i = 0; i <= count; ++i, f += f_step, d += dist_step)
-            {
-                point_3d ps = p1_s + v_s * f;
-
-                // experimental method
                 if (enable_experimental)
                 {
-                    point_3d o = p1_xy + v_xy * 0.5;
-                    point_3d d = ps - o;
-                    point_3d p_curve = bg::formula::projected_to_surface(o, d, sph);
-                    curve_experimental.push_back(p_curve);
+                    curve_experimental.clear();
+                    fill_navigation_curve< experimental_inverse<double> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
+                }
+
+                if (enable_mapping_geodetic)
+                {
+                    fill_navigation_curve< great_circle_inverse<double, mapping_geodetic> >(p1, p2, dist_step, curve_mapped_geodetic, azimuth_mapping_geodetic);
+                }
+
+                if (enable_mapping_geocentric)
+                {
+                    fill_navigation_curve< great_circle_inverse<double, mapping_geocentric> >(p1, p2, dist_step, curve_mapped_geocentric, azimuth_mapping_geocentric);
+                }
+
+                if (enable_mapping_reduced)
+                {
+                    fill_navigation_curve< great_circle_inverse<double, mapping_reduced> >(p1, p2, dist_step, curve_mapped_reduced, azimuth_mapping_reduced);
                 }
 
                 if (enable_great_ellipse)
                 {
-                    point_3d p_curve = bg::formula::projected_to_surface(ps, sph);
-                    curve_great_ellipse.push_back(p_curve);
+                    fill_navigation_curve< great_ellipse_inverse<double> >(p1, p2, dist_step, curve_great_ellipse, azimuth_great_ellipse);
+                    v_azimuth_great_ellipse = make_p_azimuth(azimuth_great_ellipse);
                 }
 
                 if (enable_vincenty)
                 {
-                    typedef bg::formula::vincenty_direct<double> direct_t;
-                    direct_t::result_type res = direct_t::apply(lon1, lat1, d, azimuth_vincenty, sph);
-                    point_geo p;
-                    bg::set_from_radian<0>(p, res.lon2);
-                    bg::set_from_radian<1>(p, res.lat2);
-                    point_3d p_curve = pcast<point_3d>(p);
-                    curve_vincenty.push_back(p_curve);
+                    fill_navigation_curve< bg::formula::vincenty_inverse<double, true, true> >(p1, p2, dist_step, curve_vincenty, azimuth_vincenty);
+                    v_azimuth_vincenty = make_p_azimuth(azimuth_vincenty);
+                }
+
+                if (enable_andoyer)
+                {
+                    fill_navigation_curve< bg::formula::andoyer_inverse<double, true, true> >(p1, p2, dist_step, curve_andoyer, azimuth_andoyer);
+                    v_azimuth_andoyer = make_p_azimuth(azimuth_andoyer);
                 }
 
                 if (enable_thomas)
                 {
-                    typedef bg::formula::thomas_direct<double> direct_t;
-                    direct_t::result_type res = direct_t::apply(lon1, lat1, d, azimuth_thomas, sph);
-                    point_geo p;
-                    bg::set_from_radian<0>(p, res.lon2);
-                    bg::set_from_radian<1>(p, res.lat2);
-                    point_3d p_curve = pcast<point_3d>(p);
-                    curve_thomas.push_back(p_curve);
-                }
-
-                // mapped to sphere
-                if ( enable_mapping_geodetic )
-                {
-                    push_to_mapped(p1, p2, f, curve_mapped_geodetic, mapping_geodetic);
-                }
-
-                if ( enable_mapping_geocentric )
-                {
-                    push_to_mapped(p1, p2, f, curve_mapped_geocentric, mapping_geocentric);
-                }
-
-                if ( enable_mapping_reduced )
-                {
-                    push_to_mapped(p1, p2, f, curve_mapped_reduced, mapping_reduced);
+                    fill_navigation_curve< bg::formula::thomas_inverse<double, true, true> >(p1, p2, dist_step, curve_thomas, azimuth_thomas);
+                    v_azimuth_thomas = make_p_azimuth(azimuth_thomas);
                 }
             }
+            else if (mode == mode_segment)
+            {
+                double lon1 = bg::get_as_radian<0>(p1);
+                double lat1 = bg::get_as_radian<1>(p1);
+                double lon2 = bg::get_as_radian<0>(p2);
+                double lat2 = bg::get_as_radian<1>(p2);
+
+                double azimuth_vincenty = 0;
+                double azimuth_thomas = 0;
+
+                if (enable_vincenty)
+                {
+                    azimuth_vincenty = bg::formula::vincenty_inverse<double, false, true>::apply(
+                        lon1, lat1, lon2, lat2, sph).azimuth;
+                }
+
+                if (enable_thomas)
+                {
+                    azimuth_thomas = bg::formula::thomas_inverse<double, false, true>::apply(
+                        lon1, lat1, lon2, lat2, sph).azimuth;
+                }
+
+
+                double f = 0;
+                double d = 0;
+                for (int i = 0; i <= count; ++i, f += f_step, d += dist_step)
+                {
+                    point_3d ps = p1_s + v_s * f;
+
+                    // experimental method
+                    if (enable_experimental)
+                    {
+                        point_3d o = p1_xy + v_xy * 0.5;
+                        point_3d d = ps - o;
+                        point_3d p_curve = o, dummy;
+                        bg::formula::projected_to_surface(o, d, p_curve, dummy, sph);
+                        curve_experimental.push_back(p_curve);
+                    }
+
+                    if (enable_great_ellipse)
+                    {
+                        point_3d p_curve = bg::formula::projected_to_surface(ps, sph);
+                        curve_great_ellipse.push_back(p_curve);
+                    }
+
+                    if (enable_vincenty)
+                    {
+                        typedef bg::formula::vincenty_direct<double> direct_t;
+                        direct_t::result_type res = direct_t::apply(lon1, lat1, d, azimuth_vincenty, sph);
+                        point_geo p;
+                        bg::set_from_radian<0>(p, res.lon2);
+                        bg::set_from_radian<1>(p, res.lat2);
+                        point_3d p_curve = pcast<point_3d>(p);
+                        curve_vincenty.push_back(p_curve);
+                    }
+
+                    if (enable_thomas)
+                    {
+                        typedef bg::formula::thomas_direct<double> direct_t;
+                        direct_t::result_type res = direct_t::apply(lon1, lat1, d, azimuth_thomas, sph);
+                        point_geo p;
+                        bg::set_from_radian<0>(p, res.lon2);
+                        bg::set_from_radian<1>(p, res.lat2);
+                        point_3d p_curve = pcast<point_3d>(p);
+                        curve_thomas.push_back(p_curve);
+                    }
+
+                    // mapped to sphere
+                    if (enable_mapping_geodetic)
+                    {
+                        push_to_mapped(p1, p2, f, curve_mapped_geodetic, mapping_geodetic);
+                    }
+
+                    if (enable_mapping_geocentric)
+                    {
+                        push_to_mapped(p1, p2, f, curve_mapped_geocentric, mapping_geocentric);
+                    }
+
+                    if (enable_mapping_reduced)
+                    {
+                        push_to_mapped(p1, p2, f, curve_mapped_reduced, mapping_reduced);
+                    }
+                }
+            }
+        }
+        else if (mode == mode_intersection)
+        {
+            double plon1 = bg::get_as_radian<0>(p1);
+            double plat1 = bg::get_as_radian<1>(p1);
+            double plon2 = bg::get_as_radian<0>(p2);
+            double plat2 = bg::get_as_radian<1>(p2);
+            double qlon1 = bg::get_as_radian<0>(q1);
+            double qlat1 = bg::get_as_radian<1>(q1);
+            double qlon2 = bg::get_as_radian<0>(q2);
+            double qlat2 = bg::get_as_radian<1>(q2);
+
+            typedef bg::formula::vincenty_inverse<double, true, true> inverse_t;
+            inverse_t::result_type ires = inverse_t::apply(plon1, plat1, plon2, plat2, sph);
+            double dist_step1 = ires.distance / count;
+            double azimuth1 = ires.azimuth;
+
+            ires = inverse_t::apply(qlon1, qlat1, qlon2, qlat2, sph);
+            double dist_step2 = ires.distance / count;
+            double azimuth2 = ires.azimuth;
+
+            double f = 0;
+            double d1 = 0;
+            double d2 = 0;
+            for (int i = 0; i <= count; ++i, f += f_step, d1 += dist_step1, d2 += dist_step2)
+            {
+                typedef bg::formula::vincenty_direct<double> direct_t;
+                direct_t::result_type res = direct_t::apply(plon1, plat1, d1, azimuth1, sph);
+                point_geo p;
+                bg::set_from_radian<0>(p, res.lon2);
+                bg::set_from_radian<1>(p, res.lat2);
+                curve_vincenty.push_back(pcast<point_3d>(p));
+
+                res = direct_t::apply(qlon1, qlat1, d2, azimuth2, sph);
+                bg::set_from_radian<0>(p, res.lon2);
+                bg::set_from_radian<1>(p, res.lat2);
+                curve2_vincenty.push_back(pcast<point_3d>(p));
+
+                {
+                    point_3d ps = p1_s + v_s * f;
+                    point_3d o = p1_xy + v_xy * 0.5;
+                    point_3d d = ps - o;
+                    point_3d p_curve = o, dummy;
+                    bg::formula::projected_to_surface(o, d, p_curve, dummy, sph);
+                    curve_experimental.push_back(p_curve);
+                }
+
+                {
+                    point_3d qs = q1_s + w_s * f;
+                    point_3d o = q1_xy + w_xy * 0.5;
+                    point_3d d = qs - o;
+                    point_3d p_curve = o, dummy;
+                    bg::formula::projected_to_surface(o, d, p_curve, dummy, sph);
+                    curve2_experimental.push_back(p_curve);
+                }
+            }
+
+            bg::formula::elliptic_intersection(p1_s, p2_s, q1_s, q2_s, i_experimental_s, sph);
+            i_experimental = bg::formula::cart3d_to_geo<point_geo>(i_experimental_s, sph);
+
+            double i_lon = 0, i_lat = 0;
+            bg::formula::gnomonic_intersection<double, bg::formula::vincenty_inverse, bg::formula::vincenty_direct>
+                ::apply(plon1, plat1, plon2, plat2, qlon1, qlat1, qlon2, qlat2, i_lon, i_lat, sph);
+            bg::set_from_radian<0>(i_vincenty_gnomonic, i_lon);
+            bg::set_from_radian<1>(i_vincenty_gnomonic, i_lat);
+            i_vincenty_gnomonic_s = bg::formula::geo_to_cart3d<point_3d>(i_vincenty_gnomonic, sph);
+
+            bg::formula::sjoberg_intersection<double, bg::formula::vincenty_inverse, 4>
+                ::apply(plon1, plat1, plon2, plat2,
+                        qlon1, qlat1, qlon2, qlat2,
+                        i_lon, i_lat,
+                        sph);
+            bg::set_from_radian<0>(i_vincenty_sjoberg, i_lon);
+            bg::set_from_radian<1>(i_vincenty_sjoberg, i_lat);
+            i_vincenty_sjoberg_s = bg::formula::geo_to_cart3d<point_3d>(i_vincenty_sjoberg, sph);
         }
     }
 
@@ -782,7 +910,7 @@ struct scene_data
 
     void cycle_mode()
     {
-        mode = mode_type((mode + 1) % 2);
+        mode = mode_type((mode + 1) % 3);
     }
 
     void print_settings() const
@@ -869,8 +997,10 @@ void draw_curve(std::vector<point_3d> const& curve, color const& color_first, co
     }
 }
 
-point_geo p1(-60, 0);
-point_geo p2(60, 60);
+point_geo p1(-30, -30);
+point_geo p2(30, 30);
+point_geo q1(-30, 30);
+point_geo q2(30, -30);
 
 float yaw = 0;
 float pitch = 0;
@@ -900,77 +1030,81 @@ void render_scene()
     draw_point_adv(p1, color(1, 0.5, 0));
     draw_point_adv(p2, color(1, 1, 0));
 
-    // draw experimental lines
-    if ( data.enable_experimental )
-    {
-        /*
-        glColor3f(1, 1, 1);
-        draw_line(data.p1_s, data.p2_s);
-        draw_line(data.p1_xy, data.p2_xy);
-        
-        size_t count = data.lines_experimental.size();
-        double f = 0;
-        double f_step = 1.0 / count;
-        for ( size_t i = 0 ; i < count ; ++i, f += f_step )
-        {
-            glColor3f(1, 0.5+0.5*f, 0); // orange -> yellow
-            draw_line(data.lines_experimental[i].first, data.lines_experimental[i].second);
-        }*/
-    }
-
-    glLineWidth(3);
-    
-    if ( data.enable_experimental ) // orange -> yellow
-        draw_curve(data.curve_experimental, color(1, 0.5, 0), color(1, 1, 0));
-
-    if ( data.enable_mapping_geodetic ) // red
-        draw_curve(data.curve_mapped_geodetic, color(0.5, 0, 0), color(1, 0, 0));
-    if ( data.enable_mapping_geocentric ) // violet
-        draw_curve(data.curve_mapped_geocentric, color(0.25, 0, 0.5), color(0.5, 0, 1));
-    if ( data.enable_mapping_reduced ) // blue
-        draw_curve(data.curve_mapped_reduced, color(0, 0.25, 0.5), color(0, 0.5, 1));
-
-    if ( data.enable_great_ellipse ) // green
-    {
-        draw_curve(data.curve_great_ellipse, color(0, 0.5, 0), color(0, 1, 0));
-        //glColor3f(0, 0.5, 0);
-        //draw_line(data.p1_s, data.p1_s + data.v_azimuth_great_ellipse*0.3);
-        /*
-        size_t count = data.curve_great_ellipse.size();
-        double f = 0;
-        double f_step = 1.0 / count;
-        for (size_t i = 0; i < count; ++i, f += f_step)
-        {
-            glColor3f(0, 0.5 + i * 0.5 / count, 0);
-            draw_line(point_3d(0, 0, 0), data.curve_great_ellipse[i]);
-        }
-        */
-    }
-
-    if (data.enable_vincenty) // gray->white
-    {
-        draw_curve(data.curve_vincenty, color(0.75, 0.75, 0.75), color(1, 1, 1));
-        //glColor3f(0.75, 0.75, 0.75);
-        //draw_line(data.p1_s, data.p1_s + data.v_azimuth_vincenty*0.3);
-    }
-    if (data.enable_andoyer) // magenta
-    {
-        draw_curve(data.curve_andoyer, color(0.75, 0, 0.75), color(1, 0, 1));
-        //glColor3f(0.75, 0, 0.75);
-        //draw_line(data.p1_s, data.p1_s + data.v_azimuth_andoyer*0.3);
-    }
-    if (data.enable_thomas) // cyan
-    {
-        draw_curve(data.curve_thomas, color(0, 0.75, 0.75), color(0, 1, 1));
-        //glColor3f(0, 0.75, 0.75);
-        //draw_line(data.p1_s, data.p1_s + data.v_azimuth_thomas*0.3);
-    }
-
     // loc
     glColor3f(1, 0, 0);
-    draw_line(data.p1_s, data.p1_s + data.loc_north*0.2);
+    draw_line(data.p1_s, data.p1_s + data.p_north*0.2);
     glColor3f(0, 1, 0);
-    draw_line(data.p1_s, data.p1_s + data.loc_east*0.2);
+    draw_line(data.p1_s, data.p1_s + data.p_east*0.2);
+
+    if (data.mode == scene_data::mode_navigation || data.mode == scene_data::mode_segment)
+    {
+        glLineWidth(3);
+
+        if (data.enable_experimental) // orange -> yellow
+            draw_curve(data.curve_experimental, color(1, 0.5, 0), color(1, 1, 0));
+
+        if (data.enable_mapping_geodetic) // red
+            draw_curve(data.curve_mapped_geodetic, color(0.5, 0, 0), color(1, 0, 0));
+        if (data.enable_mapping_geocentric) // violet
+            draw_curve(data.curve_mapped_geocentric, color(0.25, 0, 0.5), color(0.5, 0, 1));
+        if (data.enable_mapping_reduced) // blue
+            draw_curve(data.curve_mapped_reduced, color(0, 0.25, 0.5), color(0, 0.5, 1));
+
+        if (data.enable_great_ellipse) // green
+        {
+            draw_curve(data.curve_great_ellipse, color(0, 0.5, 0), color(0, 1, 0));
+        }
+
+        if (data.enable_vincenty) // gray->white
+        {
+            draw_curve(data.curve_vincenty, color(0.75, 0.75, 0.75), color(1, 1, 1));
+        }
+        if (data.enable_andoyer) // magenta
+        {
+            draw_curve(data.curve_andoyer, color(0.75, 0, 0.75), color(1, 0, 1));
+        }
+        if (data.enable_thomas) // cyan
+        {
+            draw_curve(data.curve_thomas, color(0, 0.75, 0.75), color(0, 1, 1));
+        }
+    }
+
+    if (data.mode == scene_data::mode_intersection)
+    {
+        glLineWidth(2);
+
+        // loc
+        glColor3f(1, 0, 0);
+        draw_line(data.q1_s, data.q1_s + data.q_north*0.2);
+        glColor3f(0, 1, 0);
+        draw_line(data.q1_s, data.q1_s + data.q_east*0.2);
+
+        glLineWidth(1);
+
+        glColor3f(0, 0.5, 1);
+        draw_parallel(bg::get<1>(q1) * d2r);
+        glColor3f(0, 1, 1);
+        draw_parallel(bg::get<1>(q2) * d2r);
+
+        glLineWidth(2);
+
+        draw_point_adv(q1, color(0, 0.5, 1));
+        draw_point_adv(q2, color(0, 1, 1));
+
+        glLineWidth(3);
+
+        draw_curve(data.curve_experimental, color(1, 0.5, 0), color(1, 1, 0));
+        draw_curve(data.curve2_experimental, color(0, 0.5, 1), color(0, 1, 1));
+        draw_curve(data.curve_vincenty, color(1, 1, 1), color(1, 1, 1));
+        draw_curve(data.curve2_vincenty, color(1, 1, 1), color(1, 1, 1));
+
+        glColor3f(1, 1, 0);
+        draw_point(data.i_experimental_s);
+        glColor3f(1, 1, 1);
+        draw_point(data.i_vincenty_gnomonic_s);
+        glColor3f(1, 0, 1);
+        draw_point(data.i_vincenty_sjoberg_s);
+    }
     
     glPopMatrix();
     glFlush();
@@ -1048,10 +1182,10 @@ void print_help()
               << "Mouse - navigation" << '\n'
               << "WSAD  - move p1" << '\n'
               << "IKJL  - move p2" << '\n'
-              << "h     - display help" << '\n'
+              << "?     - display help" << '\n'
               << ",     - decrease b, increase flattening" << '\n'
               << ".     - increase b, decrease flattening" << '\n'
-              << "m     - experimental method switch" << '\n'
+              << "m     - mode switch" << '\n'
               << "1     - experimental curve on/off" << '\n'
               << "2     - geodetic curve on/off" << '\n'
               << "3     - geocentric curve on/off" << '\n'
@@ -1094,6 +1228,14 @@ void print_distances_and_azimuths()
               << "map geodetic:   " << data.azimuth_mapping_geodetic << '\n'
               << "map reduced:    " << data.azimuth_mapping_reduced << '\n';
                   
+    if (data.mode == scene_data::mode_intersection)
+    {
+        std::cout << "INTERSECTIONS\n"
+                  << "vincenty gnomonic: " << bg::get<0>(data.i_vincenty_gnomonic) << ", " << bg::get<1>(data.i_vincenty_gnomonic) << '\n'
+                  << "vincenty sjoberg:  " << bg::get<0>(data.i_vincenty_sjoberg) << ", " << bg::get<1>(data.i_vincenty_sjoberg) << '\n'
+                  << "experimental:      " << bg::get<0>(data.i_experimental) << ", " << bg::get<1>(data.i_experimental) << '\n';
+    }
+
     std::cout.flush();
 }
 
@@ -1119,7 +1261,7 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 
     bool refresh = true;
 
-    if ( key == 'h' )
+    if ( key == '/' )
     {
         print_help();
     }
@@ -1197,15 +1339,24 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
         move_lon(p1, -1);
     else if ( key == 'd' )
         move_lon(p1, 1);
-    // moving of the p2
-    else if ( key == 'i' )
-        move_lat(p2, 1);
-    else if ( key == 'k' )
-        move_lat(p2, -1);
-    else if ( key == 'j' )
-        move_lon(p2, -1);
-    else if ( key == 'l' )
-        move_lon(p2, 1);
+    // moving of the q1
+    else if (key == 't')
+        move_lat(q1, 1);
+    else if (key == 'g')
+        move_lat(q1, -1);
+    else if (key == 'f')
+        move_lon(q1, -1);
+    else if (key == 'h')
+        move_lon(q1, 1);
+    // moving of the q2
+    else if (key == 'i')
+        move_lat(q2, 1);
+    else if (key == 'k')
+        move_lat(q2, -1);
+    else if (key == 'j')
+        move_lon(q2, -1);
+    else if (key == 'l')
+        move_lon(q2, 1);
     // other key
     else
         refresh = false;
@@ -1215,7 +1366,41 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
         print_geometry();
         data.print_settings();
 
-        data.recalculate(p1, p2);
+        data.recalculate(p1, p2, q1, q2);
+        data.print_curve_lengths();
+        print_distances_and_azimuths();
+    }
+}
+
+void special_input(int key, int x, int y)
+{
+    bool refresh = true;
+
+    // moving of the p2
+    switch (key)
+    {
+    case GLUT_KEY_UP:
+        move_lat(p2, 1);
+        break;
+    case GLUT_KEY_DOWN:
+        move_lat(p2, -1);
+        break;
+    case GLUT_KEY_LEFT:
+        move_lon(p2, -1);
+        break;
+    case GLUT_KEY_RIGHT:
+        move_lon(p2, 1);
+        break;
+    default:
+        refresh = false;
+    }
+
+    if (refresh)
+    {
+        print_geometry();
+        data.print_settings();
+
+        data.recalculate(p1, p2, q1, q2);
         data.print_curve_lengths();
         print_distances_and_azimuths();
     }
@@ -1243,7 +1428,7 @@ int main(int argc, char **argv)
     print_geometry();
     data.print_settings();
 
-    data.recalculate(p1, p2);
+    data.recalculate(p1, p2, q1, q2);
     data.print_curve_lengths();
     print_distances_and_azimuths();
     
@@ -1259,6 +1444,7 @@ int main(int argc, char **argv)
     glutMouseFunc(mouse);
     glutMotionFunc(mouse_move);
     glutKeyboardFunc(keyboard);
+    glutSpecialFunc(special_input);
 
     glutMainLoop();
 
