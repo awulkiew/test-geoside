@@ -399,13 +399,17 @@ struct scene_data
     std::vector<point_3d> curve2_experimental;
     std::vector<point_3d> curve2_vincenty;
     
-    point_geo i_experimental;
+    point_geo i_elliptic;
     point_geo i_vincenty_gnomonic;
     point_geo i_vincenty_sjoberg;
 
-    point_3d i_experimental_s;
+    point_3d i_elliptic_s;
     point_3d i_vincenty_gnomonic_s;
     point_3d i_vincenty_sjoberg_s;
+
+    bool i_elliptic_ok;
+    bool i_vincenty_gnomonic_ok;
+    bool i_vincenty_sjoberg_ok;
 
     double azimuth_vincenty;
     double azimuth_andoyer;
@@ -418,7 +422,7 @@ struct scene_data
 
     scene_data()
     {
-        mode = mode_navigation;
+        mode = mode_intersection;
         enable_experimental = true;
         enable_mapping_geodetic = true;
         enable_mapping_geocentric = true;
@@ -433,6 +437,10 @@ struct scene_data
 
     void clear()
     {
+        i_elliptic_ok = false;
+        i_vincenty_gnomonic_ok = false;
+        i_vincenty_sjoberg_ok = false;
+
         azimuth_vincenty = 0;
         azimuth_andoyer = 0;
         azimuth_thomas = 0;
@@ -689,17 +697,18 @@ struct scene_data
                 }
             }
 
-            bg::formula::elliptic_intersection(p1_s, p2_s, q1_s, q2_s, i_experimental_s, sph);
-            i_experimental = bg::formula::cart3d_to_geo<point_geo>(i_experimental_s, sph);
+            //bg::formula::experimental_elliptic_intersection(p1_s, p2_s, q1_s, q2_s, i_elliptic_s, sph);
+            i_elliptic_ok = bg::formula::great_elliptic_intersection(p1_s, p2_s, q1_s, q2_s, i_elliptic_s, sph);
+            i_elliptic = bg::formula::cart3d_to_geo<point_geo>(i_elliptic_s, sph);
 
             double i_lon = 0, i_lat = 0;
-            bg::formula::gnomonic_intersection<double, bg::formula::vincenty_inverse, bg::formula::vincenty_direct>
+            i_vincenty_gnomonic_ok = bg::formula::gnomonic_intersection<double, bg::formula::vincenty_inverse, bg::formula::vincenty_direct>
                 ::apply(plon1, plat1, plon2, plat2, qlon1, qlat1, qlon2, qlat2, i_lon, i_lat, sph);
             bg::set_from_radian<0>(i_vincenty_gnomonic, i_lon);
             bg::set_from_radian<1>(i_vincenty_gnomonic, i_lat);
             i_vincenty_gnomonic_s = bg::formula::geo_to_cart3d<point_3d>(i_vincenty_gnomonic, sph);
 
-            bg::formula::sjoberg_intersection<double, bg::formula::vincenty_inverse, 4>
+            i_vincenty_sjoberg_ok = bg::formula::sjoberg_intersection<double, bg::formula::vincenty_inverse, 4>
                 ::apply(plon1, plat1, plon2, plat2,
                         qlon1, qlat1, qlon2, qlat2,
                         i_lon, i_lat,
@@ -997,10 +1006,52 @@ void draw_curve(std::vector<point_3d> const& curve, color const& color_first, co
     }
 }
 
-point_geo p1(-30, -30);
-point_geo p2(30, 30);
-point_geo q1(-30, 30);
-point_geo q2(30, -30);
+/*
+point_geo p1(1, 1);
+point_geo p2(2, 2);
+point_geo q1(-2, -1);
+point_geo q2(-1, -1);
+*/
+/*
+point_geo p1(-25, -31);
+point_geo p2(3, 44);
+point_geo q1(-66, -14);
+point_geo q2(-1, -1);
+*/
+/*
+point_geo p1(-47, -8);
+point_geo p2(-1, -4);
+point_geo q1(-40, -5);
+point_geo q2(-5, -5);
+*/
+/*
+point_geo p1(-43, -8);
+point_geo p2(3, -4);
+point_geo q1(-43, -5);
+point_geo q2(3, -7);
+*/
+/*
+point_geo p1(-1, -17);
+point_geo p2(-5, 3);
+point_geo q1(-40, -5);
+point_geo q2(-1, -5);
+*/
+point_geo p1(-29, -4);
+point_geo p2(-1, -5);
+point_geo q1(-40, -5);
+point_geo q2(-1, -5);
+/*
+p1: (-4.0000000000000000, -6.0000000000000000)
+p2: (-40.0000000000000000, -5.0000000000000000)
+q1: (-40.0000000000000000, -5.0000000000000000)
+q2: (-1.0000000000000000, -5.0000000000000000)
+*/
+/*
+p1: (5.0000000000000000, -4.0000000000000000)
+p2: (-25.0000000000000000, -5.0000000000000000)
+q1: (-40.0000000000000000, -5.0000000000000000)
+q2: (-1.0000000000000000, -5.0000000000000000)
+*/
 
 float yaw = 0;
 float pitch = 0;
@@ -1041,7 +1092,48 @@ void render_scene()
         glLineWidth(3);
 
         if (data.enable_experimental) // orange -> yellow
+        {
             draw_curve(data.curve_experimental, color(1, 0.5, 0), color(1, 1, 0));
+
+            //TEST
+            size_t midindex = data.curve_experimental.size() / 2;
+            point_3d midpoint_s = data.curve_experimental[midindex];
+            point_3d midpoint_xy = bg::formula::projected_to_xy(midpoint_s, sph);
+            point_3d vec_perp = midpoint_s - midpoint_xy;
+            point_3d p1_s = bg::formula::geo_to_cart3d<point_3d>(p1, sph);
+            point_3d p2_s = bg::formula::geo_to_cart3d<point_3d>(p2, sph);
+            point_3d xy1 = bg::formula::projected_to_xy(p1_s, sph);
+            point_3d xy2 = bg::formula::projected_to_xy(p2_s, sph);
+            point_3d xy12_2 = (xy1 + xy2) / 2;
+            point_3d vec_plane = midpoint_s - xy12_2;
+
+            glColor3f(1, 1, 0);
+            draw_line(xy12_2, xy12_2 + vec_plane * 1.3);
+            glColor3f(1, 1, 1);
+            draw_line(midpoint_xy, midpoint_xy + vec_perp * 1.3);
+
+            point_3d test_v0(bg::get<0>(xy12_2) * 2 / a / a,
+                             bg::get<1>(xy12_2) * 2 / a / a,
+                             bg::get<2>(xy12_2) * 2 / b / b);
+            glColor3f(0, 0, 1);
+            draw_line(xy12_2, xy12_2 + test_v0);
+            draw_point(xy12_2, 0.02);
+
+            point_3d midpoint = (p1_s + p2_s) / 2;
+            point_3d test_v(bg::get<0>(midpoint) * 2 / a / a,
+                            bg::get<1>(midpoint) * 2 / a / a,
+                            bg::get<2>(midpoint) * 2 / b / b);
+            glColor3f(1, 0, 0);
+            draw_line(midpoint, midpoint + test_v);
+            draw_point(midpoint, 0.02);
+
+            point_3d test_v2(bg::get<0>(midpoint_s) * 2 / a / a,
+                             bg::get<1>(midpoint_s) * 2 / a / a,
+                             bg::get<2>(midpoint_s) * 2 / b / b);
+            glColor3f(0, 1, 0);
+            draw_line(midpoint_s, midpoint_s + test_v2);
+            draw_point(midpoint_s, 0.02);
+        }
 
         if (data.enable_mapping_geodetic) // red
             draw_curve(data.curve_mapped_geodetic, color(0.5, 0, 0), color(1, 0, 0));
@@ -1098,12 +1190,21 @@ void render_scene()
         draw_curve(data.curve_vincenty, color(1, 1, 1), color(1, 1, 1));
         draw_curve(data.curve2_vincenty, color(1, 1, 1), color(1, 1, 1));
 
-        glColor3f(1, 1, 0);
-        draw_point(data.i_experimental_s);
-        glColor3f(1, 1, 1);
-        draw_point(data.i_vincenty_gnomonic_s);
-        glColor3f(1, 0, 1);
-        draw_point(data.i_vincenty_sjoberg_s);
+        if (data.i_elliptic_ok)
+        {
+            glColor3f(1, 1, 0);
+            draw_point(data.i_elliptic_s);
+        }
+        if (data.i_vincenty_gnomonic_ok)
+        {
+            glColor3f(1, 1, 1);
+            draw_point(data.i_vincenty_gnomonic_s);
+        }
+        if (data.i_vincenty_sjoberg_ok)
+        {
+            glColor3f(1, 0, 1);
+            draw_point(data.i_vincenty_sjoberg_s);
+        }
     }
     
     glPopMatrix();
@@ -1203,6 +1304,11 @@ void print_geometry()
     std::cout << "GEOMETRY\n";
     std::cout << "p1:         (" << bg::get<0>(p1) << ", " << bg::get<1>(p1) << ")\n";
     std::cout << "p2:         (" << bg::get<0>(p2) << ", " << bg::get<1>(p2) << ")\n";
+    if (data.mode == scene_data::mode_intersection)
+    {
+        std::cout << "q1:         (" << bg::get<0>(q1) << ", " << bg::get<1>(q1) << ")\n";
+        std::cout << "q2:         (" << bg::get<0>(q2) << ", " << bg::get<1>(q2) << ")\n";
+    }
     std::cout << "flattening: " << flattening(a, b) << std::endl;
 }
 
@@ -1230,10 +1336,20 @@ void print_distances_and_azimuths()
                   
     if (data.mode == scene_data::mode_intersection)
     {
-        std::cout << "INTERSECTIONS\n"
-                  << "vincenty gnomonic: " << bg::get<0>(data.i_vincenty_gnomonic) << ", " << bg::get<1>(data.i_vincenty_gnomonic) << '\n'
-                  << "vincenty sjoberg:  " << bg::get<0>(data.i_vincenty_sjoberg) << ", " << bg::get<1>(data.i_vincenty_sjoberg) << '\n'
-                  << "experimental:      " << bg::get<0>(data.i_experimental) << ", " << bg::get<1>(data.i_experimental) << '\n';
+        std::cout << "INTERSECTIONS\n";
+        if (data.i_elliptic_ok)
+            std::cout << "elliptic:          " << bg::get<0>(data.i_elliptic) << ", " << bg::get<1>(data.i_elliptic) << '\n';
+        else
+            std::cout << "elliptic:          error\n";
+        if (data.i_vincenty_gnomonic_ok)
+            std::cout << "vincenty gnomonic: " << bg::get<0>(data.i_vincenty_gnomonic) << ", " << bg::get<1>(data.i_vincenty_gnomonic) << '\n';
+        else
+            std::cout << "vincenty gnomonic: error\n";
+        if (data.i_vincenty_sjoberg_ok)
+            std::cout << "vincenty sjoberg:  " << bg::get<0>(data.i_vincenty_sjoberg) << ", " << bg::get<1>(data.i_vincenty_sjoberg) << '\n';
+        else
+            std::cout << "vincenty sjoberg:  error\n";
+        
     }
 
     std::cout.flush();
@@ -1411,6 +1527,17 @@ void idle_fun()
     glutPostRedisplay();
 }
 
+#include <boost/geometry/geometries/register/point.hpp>
+
+struct my_geo_point
+{
+    my_geo_point() {}
+    my_geo_point(double l, double ll) : lon(l), lat(ll) {}
+    double lon, lat;
+};
+
+BOOST_GEOMETRY_REGISTER_POINT_2D(my_geo_point, double, bg::cs::geographic<bg::degree>, lon, lat);
+
 int main(int argc, char **argv)
 {
     //test
@@ -1422,6 +1549,27 @@ int main(int argc, char **argv)
                   << "andoyer: " << bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph)) << '\n'
                   << "thomas: " << bg::distance(p1, p2, bg::strategy::distance::thomas<spheroid>(sph)) << '\n'
                   << "haversine:    " << bg::distance(p1, p2, bg::strategy::distance::haversine<double>((2*a+b)/3)) << '\n';
+    }
+    {
+        typedef bg::model::multi_point<my_geo_point> mpt;
+        my_geo_point p1(0, 0);
+        my_geo_point p2(1, 0);
+        double a = 6378137.0;
+        double b = 6356752.314245179;
+        spheroid sph(a, b);
+        double da = bg::distance(p1, p2, bg::strategy::distance::andoyer<spheroid>(sph));
+        double dv = bg::distance(p1, p2, bg::strategy::distance::vincenty<spheroid>(sph));
+
+        std::cout << std::setprecision(20);
+        std::cout << da << std::endl;
+        std::cout << dv << std::endl;
+
+        mpt mp;
+        mp.push_back(p2);
+        da = bg::distance(p1, mp, bg::strategy::distance::andoyer<spheroid>(sph));
+        dv = bg::distance(p1, mp, bg::strategy::distance::vincenty<spheroid>(sph));
+        std::cout << da << std::endl;
+        std::cout << dv << std::endl;
     }
 
     print_help();
