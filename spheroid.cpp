@@ -26,11 +26,13 @@ typedef bgm::point<double, 2, bg::cs::spherical_equatorial<bg::degree> > point_s
 typedef bgm::point<double, 3, bg::cs::cartesian> point_3d;
 typedef bg::srs::spheroid<double> spheroid;
 
+double f_earth = 1.0 / 298.257223563;
+double f = 0.1;
+
 double a = 1; //6378137.0;
-double b = 0.75; //6356752.314245;
+double b = a - f * a;
 spheroid sph(a, b);
 
-double f_earth = 1.0 / 298.257223563;
 double b_earth = a - f_earth * a;
 
 double pi = bg::math::pi<double>();
@@ -219,6 +221,15 @@ void draw_point(point_3d const& p, double r = 0.01)
     draw_sphere(bg::get<0>(p), bg::get<1>(p), bg::get<2>(p), r);
 }
 
+template <typename T>
+void draw_point(T const& lon, T const& lat, double r = 0.01)
+{
+    point_geo p(lon, lat);
+    point_3d p3d;
+    ::convert(p, p3d);
+    draw_point(p3d, r);
+}
+
 template <typename P>
 void draw_point(P const& p)
 {
@@ -363,7 +374,7 @@ struct scene_data
     bool enable_andoyer;
     bool enable_thomas;
 
-    std::vector<point_3d> curve_experimental;
+    std::vector<point_3d> curve_elliptic;
     std::vector<point_3d> curve_mapped_geodetic;
     std::vector<point_3d> curve_mapped_geocentric;
     std::vector<point_3d> curve_mapped_reduced;
@@ -396,7 +407,7 @@ struct scene_data
     point_3d v_azimuth_thomas;
     point_3d v_azimuth_great_ellipse;
 
-    std::vector<point_3d> curve2_experimental;
+    std::vector<point_3d> curve2_elliptic;
     std::vector<point_3d> curve2_vincenty;
     
     point_geo i_elliptic;
@@ -450,7 +461,7 @@ struct scene_data
         azimuth_mapping_reduced = 0;
         azimuth_experimental = 0;
 
-        curve_experimental.clear();
+        curve_elliptic.clear();
         curve_mapped_geodetic.clear();
         curve_mapped_geocentric.clear();
         curve_mapped_reduced.clear();
@@ -459,7 +470,7 @@ struct scene_data
         curve_andoyer.clear();
         curve_thomas.clear();
 
-        curve2_experimental.clear();
+        curve2_elliptic.clear();
         curve2_vincenty.clear();
     }
 
@@ -513,8 +524,8 @@ struct scene_data
             {
                 if (enable_experimental)
                 {
-                    curve_experimental.clear();
-                    fill_navigation_curve< experimental_inverse<double> >(p1, p2, dist_step, curve_experimental, azimuth_experimental);
+                    curve_elliptic.clear();
+                    fill_navigation_curve< experimental_inverse<double> >(p1, p2, dist_step, curve_elliptic, azimuth_experimental);
                 }
 
                 if (enable_mapping_geodetic)
@@ -592,7 +603,7 @@ struct scene_data
                         point_3d d = ps - o;
                         point_3d p_curve = o, dummy;
                         bg::formula::projected_to_surface(o, d, p_curve, dummy, sph);
-                        curve_experimental.push_back(p_curve);
+                        curve_elliptic.push_back(p_curve);
                     }
 
                     if (enable_great_ellipse)
@@ -680,20 +691,20 @@ struct scene_data
 
                 {
                     point_3d ps = p1_s + v_s * f;
-                    point_3d o = p1_xy + v_xy * 0.5;
+                    point_3d o(0, 0, 0);// = p1_xy + v_xy * 0.5;
                     point_3d d = ps - o;
                     point_3d p_curve = o, dummy;
                     bg::formula::projected_to_surface(o, d, p_curve, dummy, sph);
-                    curve_experimental.push_back(p_curve);
+                    curve_elliptic.push_back(p_curve);
                 }
 
                 {
                     point_3d qs = q1_s + w_s * f;
-                    point_3d o = q1_xy + w_xy * 0.5;
+                    point_3d o(0, 0, 0);// = q1_xy + w_xy * 0.5;
                     point_3d d = qs - o;
                     point_3d p_curve = o, dummy;
                     bg::formula::projected_to_surface(o, d, p_curve, dummy, sph);
-                    curve2_experimental.push_back(p_curve);
+                    curve2_elliptic.push_back(p_curve);
                 }
             }
 
@@ -957,7 +968,7 @@ struct scene_data
                   << "vincenty:           " << curve_length(curve_vincenty) << '\n'
                   << "thomas:             " << curve_length(curve_thomas) << '\n'
                   << "andoyer:            " << curve_length(curve_andoyer) << '\n'
-                  << "experimental:       " << curve_length(curve_experimental) << '\n'
+                  << "experimental:       " << curve_length(curve_elliptic) << '\n'
                   << "great_ellipse:      " << curve_length(curve_great_ellipse) << '\n'
                   << "mapping_geodetic:   " << curve_length(curve_mapped_geodetic) << '\n'
                   << "mapping_geocentric: " << curve_length(curve_mapped_geocentric) << '\n'
@@ -1006,52 +1017,132 @@ void draw_curve(std::vector<point_3d> const& curve, color const& color_first, co
     }
 }
 
-/*
-point_geo p1(1, 1);
-point_geo p2(2, 2);
-point_geo q1(-2, -1);
-point_geo q2(-1, -1);
-*/
-/*
-point_geo p1(-25, -31);
-point_geo p2(3, 44);
-point_geo q1(-66, -14);
-point_geo q2(-1, -1);
-*/
-/*
-point_geo p1(-47, -8);
-point_geo p2(-1, -4);
-point_geo q1(-40, -5);
-point_geo q2(-5, -5);
-*/
-/*
-point_geo p1(-43, -8);
-point_geo p2(3, -4);
-point_geo q1(-43, -5);
-point_geo q2(3, -7);
-*/
-/*
-point_geo p1(-1, -17);
-point_geo p2(-5, 3);
-point_geo q1(-40, -5);
-point_geo q2(-1, -5);
-*/
-point_geo p1(-29, -4);
-point_geo p2(-1, -5);
-point_geo q1(-40, -5);
-point_geo q2(-1, -5);
-/*
-p1: (-4.0000000000000000, -6.0000000000000000)
-p2: (-40.0000000000000000, -5.0000000000000000)
-q1: (-40.0000000000000000, -5.0000000000000000)
-q2: (-1.0000000000000000, -5.0000000000000000)
-*/
-/*
-p1: (5.0000000000000000, -4.0000000000000000)
-p2: (-25.0000000000000000, -5.0000000000000000)
-q1: (-40.0000000000000000, -5.0000000000000000)
-q2: (-1.0000000000000000, -5.0000000000000000)
-*/
+struct segments
+{
+    segments(point_geo const& p1_, point_geo const& p2_, point_geo const& q1_, point_geo const& q2_)
+        : p1(p1_), p2(p2_), q1(q1_), q2(q2_)
+    {}
+    point_geo p1, p2, q1, q2;
+};
+
+std::vector<segments> intersection_data = {
+
+    segments(
+        point_geo(1, 1),
+        point_geo(2, 2),
+        point_geo(-2, -1),
+        point_geo(-1, -1)
+    ),
+    segments(
+        point_geo(-25, -31),
+        point_geo(3, 44),
+        point_geo(-66, -14),
+        point_geo(-1, -1)
+        ),
+    segments(
+        point_geo(-47, -8),
+        point_geo(-1, -4),
+        point_geo(-40, -5),
+        point_geo(-5, -5)
+    ),
+    segments(
+        point_geo(-43, -8),
+        point_geo(3, -4),
+        point_geo(-43, -5),
+        point_geo(3, -7)
+    ),
+    segments(
+        point_geo(-1, -17),
+        point_geo(-5, 3),
+        point_geo(-40, -5),
+        point_geo(-1, -5)
+    ),
+    segments(
+        point_geo(-29, -4),
+        point_geo(-1, -5),
+        point_geo(-40, -5),
+        point_geo(-1, -5)
+    ),
+    segments(
+        point_geo(-4.0000000000000000, -6.0000000000000000),
+        point_geo(-40.0000000000000000, -5.0000000000000000),
+        point_geo(-40.0000000000000000, -5.0000000000000000),
+        point_geo(-1.0000000000000000, -5.0000000000000000)
+    ),
+    segments(
+        point_geo(5.0000000000000000, -4.0000000000000000),
+        point_geo(-25.0000000000000000, -5.0000000000000000),
+        point_geo(-40.0000000000000000, -5.0000000000000000),
+        point_geo(-1.0000000000000000, -5.0000000000000000)
+    ),
+    segments(
+        point_geo(-44, -1),
+        point_geo(38, -7),
+        point_geo(-54, -10),
+        point_geo(27, 3)
+    ),
+    segments(
+        point_geo(-29, -5),
+        point_geo(10, -5),
+        point_geo(-40, -5),
+        point_geo(-1, -5)
+    ),
+    segments(
+        point_geo(-29, -5),
+        point_geo(7, -5),
+        point_geo(-40, -5),
+        point_geo(-1, -5)
+    ),
+    segments(
+        point_geo(-29, -5),
+        point_geo(2, -5),
+        point_geo(-40, -5),
+        point_geo(-1, -5)
+    ),
+    segments(
+        point_geo(-29, -5),
+        point_geo(2, -5),
+        point_geo(-30, -5),
+        point_geo(-1, -5)
+    ),
+    segments(
+        point_geo(-29, -5),
+        point_geo(2, -5),
+        point_geo(-32, -5),
+        point_geo(-1, -5)
+    ),
+    segments(
+        point_geo(-92, -24),
+        point_geo(44, 19),
+        point_geo(-78, -5),
+        point_geo(50, -5)
+    ),
+    segments(
+        point_geo(-93, -15),
+        point_geo(22, 3),
+        point_geo(-78, -5),
+        point_geo(50, -5)
+    ),
+    segments(
+        point_geo(-93, -15),
+        point_geo(28, 3),
+        point_geo(-78, -5),
+        point_geo(50, -5)
+    ),
+    segments(
+        point_geo(-54, -21),
+        point_geo(20, 17),
+        point_geo(-59, -5),
+        point_geo(13, -5)
+    )
+};
+
+size_t current_intersection = 15;
+
+point_geo p1 = intersection_data[current_intersection].p1;
+point_geo p2 = intersection_data[current_intersection].p2;
+point_geo q1 = intersection_data[current_intersection].q1;
+point_geo q2 = intersection_data[current_intersection].q2;
 
 float yaw = 0;
 float pitch = 0;
@@ -1093,11 +1184,11 @@ void render_scene()
 
         if (data.enable_experimental) // orange -> yellow
         {
-            draw_curve(data.curve_experimental, color(1, 0.5, 0), color(1, 1, 0));
+            draw_curve(data.curve_elliptic, color(1, 0.5, 0), color(1, 1, 0));
 
             //TEST
-            size_t midindex = data.curve_experimental.size() / 2;
-            point_3d midpoint_s = data.curve_experimental[midindex];
+            size_t midindex = data.curve_elliptic.size() / 2;
+            point_3d midpoint_s = data.curve_elliptic[midindex];
             point_3d midpoint_xy = bg::formula::projected_to_xy(midpoint_s, sph);
             point_3d vec_perp = midpoint_s - midpoint_xy;
             point_3d p1_s = bg::formula::geo_to_cart3d<point_3d>(p1, sph);
@@ -1185,25 +1276,76 @@ void render_scene()
 
         glLineWidth(3);
 
-        draw_curve(data.curve_experimental, color(1, 0.5, 0), color(1, 1, 0));
-        draw_curve(data.curve2_experimental, color(0, 0.5, 1), color(0, 1, 1));
+        draw_curve(data.curve_elliptic, color(1, 0.5, 0), color(1, 1, 0));
+        draw_curve(data.curve2_elliptic, color(0, 0.5, 1), color(0, 1, 1));
         draw_curve(data.curve_vincenty, color(1, 1, 1), color(1, 1, 1));
         draw_curve(data.curve2_vincenty, color(1, 1, 1), color(1, 1, 1));
 
         if (data.i_elliptic_ok)
         {
-            glColor3f(1, 1, 0);
+            glColor3f(0.5, 1, 0.5);
             draw_point(data.i_elliptic_s);
         }
-        if (data.i_vincenty_gnomonic_ok)
+        /*if (data.i_vincenty_gnomonic_ok)
         {
             glColor3f(1, 1, 1);
             draw_point(data.i_vincenty_gnomonic_s);
-        }
+        }*/
         if (data.i_vincenty_sjoberg_ok)
         {
-            glColor3f(1, 0, 1);
+            glColor3f(1, 1, 1);
             draw_point(data.i_vincenty_sjoberg_s);
+        }
+
+        //TEST
+        {
+            double plon1 = bg::get_as_radian<0>(p1);
+            double plat1 = bg::get_as_radian<1>(p1);
+            double plon2 = bg::get_as_radian<0>(p2);
+            double plat2 = bg::get_as_radian<1>(p2);
+            double qlon1 = bg::get_as_radian<0>(q1);
+            double qlat1 = bg::get_as_radian<1>(q1);
+            double qlon2 = bg::get_as_radian<0>(q2);
+            double qlat2 = bg::get_as_radian<1>(q2);
+
+            typedef bg::formula::vincenty_inverse<double, false, true> inverse_t;
+            double azimuth1 = inverse_t::apply(plon1, plat1, plon2, plat2, sph).azimuth;
+            double azimuth2 = inverse_t::apply(qlon1, qlat1, qlon2, qlat2, sph).azimuth;
+
+            bg::formula::sjoberg_geodesic<double, 4> geod1(plon1, plat1, azimuth1, f);
+            double lon, lat;
+            geod1.vertex(lon, lat);
+            point_geo vert1;
+            bg::set_from_radian<0>(vert1, lon);
+            bg::set_from_radian<1>(vert1, lat);
+            point_3d vert1_3d;
+            convert(vert1, vert1_3d);
+
+            std::cout << "P vertex: " << lon * r2d << ", " << lat * r2d << std::endl;
+
+            bg::formula::sjoberg_geodesic<double, 4> geod2(qlon1, qlat1, azimuth2, f);
+            geod2.vertex(lon, lat);
+            point_geo vert2;
+            bg::set_from_radian<0>(vert2, lon);
+            bg::set_from_radian<1>(vert2, lat);
+            point_3d vert2_3d;
+            convert(vert2, vert2_3d);
+
+            std::cout << "Q vertex: " << lon * r2d << ", " << lat * r2d << std::endl;
+
+            glColor3f(0.75, 0.75, 0);
+            draw_point(vert1_3d);
+
+            glColor3f(0, 0.75, 0.75);
+            draw_point(vert2_3d);
+
+            //TESTEST
+            double foo, bar;
+            bg::formula::sjoberg_intersection<double, bg::formula::vincenty_inverse, 4>
+                ::apply(plon1, plat1, plon2, plat2,
+                        qlon1, qlat1, qlon2, qlat2,
+                        foo, bar,
+                        sph);
         }
     }
     
@@ -1240,6 +1382,8 @@ void resize(int w, int h)
     glEnable( GL_BLEND );
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+
+    glutPostRedisplay();
 }
 
 bool left_down = false;
@@ -1269,11 +1413,15 @@ void mouse_move(int x, int y)
     {
         yaw = prev_yaw + (x - down_x) / 10.0f;
         pitch = prev_pitch + (y - down_y) / 10.0f;
+
+        glutPostRedisplay();
     }
     
     if ( right_down )
     {
         zoom = prev_zoom + (y - down_y) / 100.0f;
+
+        glutPostRedisplay();
     }
 }
 
@@ -1371,17 +1519,19 @@ void move_lon(point_geo & p, double diff)
     bg::set<0>(p, l);
 }
 
+double move_step = 1;
+
 void keyboard(unsigned char key, int /*x*/, int /*y*/)
 {
     static const double b_step = 0.05;
 
     bool refresh = true;
 
-    if ( key == '/' )
+    if (key == '/')
     {
         print_help();
     }
-    else if ( key == '.')
+    else if (key == '.')
     {
         if (b == b_earth)
         {
@@ -1403,76 +1553,84 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 
         sph = spheroid(a, b);
     }
-    else if ( key == ',' )
+    else if (key == ',')
     {
         b -= b_step;
-        if ( b < b_step )
+        if (b < b_step)
             b = b_step;
         sph = spheroid(a, b);
     }
-    else if ( key == 'm' )
+    else if (key == 'm')
     {
         data.cycle_mode();
     }
-    else if ( key == '1' )
+    else if (key == '1')
     {
         data.enable_experimental = !data.enable_experimental;
     }
-    else if ( key == '2' )
+    else if (key == '2')
     {
         data.enable_mapping_geodetic = !data.enable_mapping_geodetic;
     }
-    else if ( key == '3' )
+    else if (key == '3')
     {
         data.enable_mapping_geocentric = !data.enable_mapping_geocentric;
     }
-    else if ( key == '4' )
+    else if (key == '4')
     {
         data.enable_mapping_reduced = !data.enable_mapping_reduced;
     }
-    else if ( key == '5' )
+    else if (key == '5')
     {
         data.enable_great_ellipse = !data.enable_great_ellipse;
     }
-    else if ( key == '6' )
+    else if (key == '6')
     {
         data.enable_vincenty = !data.enable_vincenty;
     }
-    else if ( key == '7' )
+    else if (key == '7')
     {
         data.enable_andoyer = !data.enable_andoyer;
     }
-    else if ( key == '8' )
+    else if (key == '8')
     {
         data.enable_thomas = !data.enable_thomas;
     }
     // moving of the p1
-    else if ( key == 'w' )
-        move_lat(p1, 1);
-    else if ( key == 's' )
-        move_lat(p1, -1);
-    else if ( key == 'a' )
-        move_lon(p1, -1);
-    else if ( key == 'd' )
-        move_lon(p1, 1);
+    else if (key == 'w')
+        move_lat(p1, move_step);
+    else if (key == 's')
+        move_lat(p1, -move_step);
+    else if (key == 'a')
+        move_lon(p1, -move_step);
+    else if (key == 'd')
+        move_lon(p1, move_step);
     // moving of the q1
     else if (key == 't')
-        move_lat(q1, 1);
+        move_lat(q1, move_step);
     else if (key == 'g')
-        move_lat(q1, -1);
+        move_lat(q1, -move_step);
     else if (key == 'f')
-        move_lon(q1, -1);
+        move_lon(q1, -move_step);
     else if (key == 'h')
-        move_lon(q1, 1);
+        move_lon(q1, move_step);
     // moving of the q2
     else if (key == 'i')
-        move_lat(q2, 1);
+        move_lat(q2, move_step);
     else if (key == 'k')
-        move_lat(q2, -1);
+        move_lat(q2, -move_step);
     else if (key == 'j')
-        move_lon(q2, -1);
+        move_lon(q2, -move_step);
     else if (key == 'l')
-        move_lon(q2, 1);
+        move_lon(q2, move_step);
+    else if (key == ' ')
+    {
+        current_intersection = (current_intersection + 1) % intersection_data.size();
+        p1 = intersection_data[current_intersection].p1;
+        p2 = intersection_data[current_intersection].p2;
+        q1 = intersection_data[current_intersection].q1;
+        q2 = intersection_data[current_intersection].q2;
+    }
     // other key
     else
         refresh = false;
@@ -1485,6 +1643,8 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
         data.recalculate(p1, p2, q1, q2);
         data.print_curve_lengths();
         print_distances_and_azimuths();
+
+        glutPostRedisplay();
     }
 }
 
@@ -1496,16 +1656,16 @@ void special_input(int key, int x, int y)
     switch (key)
     {
     case GLUT_KEY_UP:
-        move_lat(p2, 1);
+        move_lat(p2, move_step);
         break;
     case GLUT_KEY_DOWN:
-        move_lat(p2, -1);
+        move_lat(p2, -move_step);
         break;
     case GLUT_KEY_LEFT:
-        move_lon(p2, -1);
+        move_lon(p2, -move_step);
         break;
     case GLUT_KEY_RIGHT:
-        move_lon(p2, 1);
+        move_lon(p2, move_step);
         break;
     default:
         refresh = false;
@@ -1519,13 +1679,15 @@ void special_input(int key, int x, int y)
         data.recalculate(p1, p2, q1, q2);
         data.print_curve_lengths();
         print_distances_and_azimuths();
+
+        glutPostRedisplay();
     }
 }
 
-void idle_fun()
+/*void idle_fun()
 {
     glutPostRedisplay();
-}
+}*/
 
 #include <boost/geometry/geometries/register/point.hpp>
 
@@ -1587,7 +1749,7 @@ int main(int argc, char **argv)
     glutCreateWindow("test-geoside");
 
     glutDisplayFunc(render_scene);
-    glutIdleFunc(idle_fun);
+    //glutIdleFunc(idle_fun);
     glutReshapeFunc(resize);
     glutMouseFunc(mouse);
     glutMotionFunc(mouse_move);
