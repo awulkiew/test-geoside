@@ -26,8 +26,8 @@ typedef bgm::point<double, 2, bg::cs::spherical_equatorial<bg::degree> > point_s
 typedef bgm::point<double, 3, bg::cs::cartesian> point_3d;
 typedef bg::srs::spheroid<double> spheroid;
 
-double f_earth = 1.0 / 298.257223563;
-double f = 0.1;
+double f_earth = 1.0 - 6356752.3142451793 / 6378137.0;
+double f = f_earth;
 
 double a = 1; //6378137.0;
 double b = a - f * a;
@@ -351,6 +351,46 @@ std::pair<double, double> thomas_inverse(point_geo const& p1, point_geo const& p
     thomas_t::result_type ti = thomas_t::apply(lon1, lat1, lon2, lat2, sph);
     return std::make_pair(ti.distance, ti.azimuth);
 }
+
+/*
+template <typename PointSPh>
+PointSPh spherical_vertex(PointSPh const& p1, PointSPh const& p2)
+{
+    double lon1 = bg::get_as_radian<0>(p1);
+    double lat1 = bg::get_as_radian<1>(p1);
+    double lon2 = bg::get_as_radian<0>(p2);
+    double lat2 = bg::get_as_radian<1>(p2);
+    double dlon = lon2 - lon1; // bg::math::longitude_distance_signed<bg::radian>(lon1, lon2);
+
+    double azi = bg::formula::spherical_azimuth(lon1, lat1, lon2, lat2);
+    double lat = bg::formula::vertex_latitude_on_sphere<double>::apply(lat1, azi);
+    double lon = bg::formula::vertex_longitude_on_sphere<double>::apply(lat1, lat2, lat, dlon);
+
+    PointSPh result;
+    bg::set_from_radian<0>(result, lon1 - lon);
+    bg::set_from_radian<1>(result, lat);
+    return result;
+}
+
+template <typename FormulaPolicy, typename point_geo>
+point_geo spheroidal_vertex(point_geo const& p1, point_geo const& p2)
+{
+    double lon1 = bg::get_as_radian<0>(p1);
+    double lat1 = bg::get_as_radian<1>(p1);
+    double lon2 = bg::get_as_radian<0>(p2);
+    double lat2 = bg::get_as_radian<1>(p2);
+    double dlon = lon2 - lon1; // bg::math::longitude_distance_signed<bg::radian>(lon1, lon2);
+
+    double azi = typename FormulaPolicy::template inverse<double, false, true>::apply(lon1, lat1, lon2, lat2, sph).azimuth;
+    double lat = bg::formula::vertex_latitude_on_spheroid<double>::apply(lat1, azi, sph);
+    double lon = bg::formula::vertex_longitude_on_spheroid<double>::apply(lat1, lat2, lat, azi, sph);
+
+    point_geo result;
+    // TODO: Here something is missing, it should probably be something like lon1 - vert_lon_sph +- lon
+    bg::set_from_radian<0>(result, lon1 - lon);
+    bg::set_from_radian<1>(result, lat);
+    return result;
+}*/
 
 double bearing(double rad1, double rad2)
 {
@@ -1134,10 +1174,82 @@ std::vector<segments> intersection_data = {
         point_geo(20, 17),
         point_geo(-59, -5),
         point_geo(13, -5)
+    ),
+    segments(
+        point_geo(-31, -10),
+        point_geo(-31, -2),
+        point_geo(-37, -10),
+        point_geo(-25, -2)
+    ),
+    segments(
+        point_geo(-26, -10),
+        point_geo(-26, 13),
+        point_geo(-37, -4),
+        point_geo(-18, -4)
+    ),
+    segments(
+        point_geo(-26, -10),
+        point_geo(154, 78),
+        point_geo(-46, 41),
+        point_geo(-13, 36)
+    ),
+    segments(
+        point_geo(-26, -10),
+        point_geo(154, 68),
+        point_geo(-85, 79),
+        point_geo(22, 80)
+    ),
+    segments(
+        point_geo(-26, -10),
+        point_geo(154, 68),
+        point_geo(-148, 79),
+        point_geo(102, 80)
+    ),
+    segments(
+        point_geo(-25, 55),
+        point_geo(155, 68),
+        point_geo(-164, 79),
+        point_geo(137, 80)
+    ),
+    segments(
+        point_geo(-25, 55),
+        point_geo(155, 68),
+        point_geo(178, 79),
+        point_geo(124, 80)
+    ),
+    segments(
+        point_geo(-25.000000000000000, -5.0000000000000000),
+        point_geo(5.0000000000000000, -4.0000000000000000),
+        point_geo(-40.000000000000000, -5.0000000000000000),
+        point_geo(-1.0000000000000000, -5.0000000000000000)
+    ),
+    segments(
+        point_geo(-1, -2),
+        point_geo(-1, 2),
+        point_geo(-2, -2),
+        point_geo(2, 2)
+    ),
+    segments(
+        point_geo(23.725750, 37.971536),
+        point_geo(4.3826169, 50.8119483),
+        point_geo(0, 0),
+        point_geo(0, 0)
+    ),
+    segments(
+        point_geo(1, 1),
+        point_geo(50, 2),
+        point_geo(0, 0),
+        point_geo(0, 0)
+    ),
+    segments(
+        point_geo(1, 1),
+        point_geo(50, 1),
+        point_geo(0, 0),
+        point_geo(0, 0)
     )
 };
 
-size_t current_intersection = 15;
+size_t current_intersection = intersection_data.size() - 1;
 
 point_geo p1 = intersection_data[current_intersection].p1;
 point_geo p2 = intersection_data[current_intersection].p2;
@@ -1233,6 +1345,15 @@ void render_scene()
         if (data.enable_mapping_reduced) // blue
             draw_curve(data.curve_mapped_reduced, color(0, 0.25, 0.5), color(0, 0.5, 1));
 
+        /*if (data.enable_mapping_geocentric || data.enable_mapping_geocentric || data.enable_mapping_reduced)
+        {
+            point_geo p_vertex = spherical_vertex(p1, p2);
+            glLineWidth(2);
+            glColor3f(1, 0, 0);
+            draw_meridian(bg::get<0>(p_vertex) * d2r);
+            glLineWidth(3);
+        }*/
+
         if (data.enable_great_ellipse) // green
         {
             draw_curve(data.curve_great_ellipse, color(0, 0.5, 0), color(0, 1, 0));
@@ -1241,14 +1362,30 @@ void render_scene()
         if (data.enable_vincenty) // gray->white
         {
             draw_curve(data.curve_vincenty, color(0.75, 0.75, 0.75), color(1, 1, 1));
+            /*point_geo p_vertex = spheroidal_vertex<bg::strategy::vincenty>(p1, p2);
+            glLineWidth(2);
+            glColor3f(1, 1, 1);
+            draw_meridian(bg::get<0>(p_vertex) * d2r);
+            glLineWidth(3);*/
+
         }
         if (data.enable_andoyer) // magenta
         {
             draw_curve(data.curve_andoyer, color(0.75, 0, 0.75), color(1, 0, 1));
+            /*point_geo p_vertex = spheroidal_vertex<bg::strategy::andoyer>(p1, p2);
+            glLineWidth(2);
+            glColor3f(1, 0, 1);
+            draw_meridian(bg::get<0>(p_vertex) * d2r);
+            glLineWidth(3);*/
         }
         if (data.enable_thomas) // cyan
         {
             draw_curve(data.curve_thomas, color(0, 0.75, 0.75), color(0, 1, 1));
+            /*point_geo p_vertex = spheroidal_vertex<bg::strategy::thomas>(p1, p2);
+            glLineWidth(2);
+            glColor3f(0, 1, 1);
+            draw_meridian(bg::get<0>(p_vertex) * d2r);
+            glLineWidth(3);*/
         }
     }
 
@@ -1297,7 +1434,7 @@ void render_scene()
             draw_point(data.i_vincenty_sjoberg_s);
         }
 
-        //TEST
+        //TEST - draw geodesic vertices
         {
             double plon1 = bg::get_as_radian<0>(p1);
             double plat1 = bg::get_as_radian<1>(p1);
@@ -1338,14 +1475,6 @@ void render_scene()
 
             glColor3f(0, 0.75, 0.75);
             draw_point(vert2_3d);
-
-            //TESTEST
-            double foo, bar;
-            bg::formula::sjoberg_intersection<double, bg::formula::vincenty_inverse, 4>
-                ::apply(plon1, plat1, plon2, plat2,
-                        qlon1, qlat1, qlon2, qlat2,
-                        foo, bar,
-                        sph);
         }
     }
     
